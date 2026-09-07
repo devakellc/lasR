@@ -55,14 +55,28 @@ bool LASReptreader::process(Header*& header)
   {
     sources[0].second->populate_header(header);
 
-    int64_t npoints = header->number_of_point_records;
+    int64_t npoints = sources[0].second->get_total_points();
+    std::vector<Header> others(sources.size() - 1);
     for (size_t i = 1 ; i < sources.size() ; i++)
     {
-      Header other;
-      sources[i].second->populate_header(&other);
-      npoints += other.number_of_point_records;
+      sources[i].second->populate_header(&others[i-1]);
+      npoints += sources[i].second->get_total_points();
     }
     header->number_of_point_records = npoints;
+
+    if (!others.empty())
+    {
+      AttributeSchema merged;
+      for (const auto& attribute : header->schema.attributes)
+      {
+        bool in_all = true;
+        for (const auto& other : others)
+          if (!other.schema.has_attribute(attribute.name)) { in_all = false; break; }
+
+        if (in_all) merged.add_attribute(attribute);
+      }
+      header->schema = merged;
+    }
   }
   catch (const std::exception& e)
   {
