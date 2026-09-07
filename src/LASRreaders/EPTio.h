@@ -44,8 +44,6 @@ public:
   void reset_accessor() override;
   int64_t p_count() override;
 
-  int64_t get_total_points() const { return total_points; };
-
   void set_depth(int depth);
 
   void query(const std::string& endpoint,

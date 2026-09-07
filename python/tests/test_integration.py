@@ -5,6 +5,7 @@ Integration tests for pylasr using actual data processing workflows
 
 import os
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -285,14 +286,14 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         self.assertEqual(two, 2 * one)
 
     def test_intersection_keeps_attributes_common_to_all_sources(self):
-        import struct, tempfile, os as _os
-        out = _os.path.join(tempfile.mkdtemp(), "two.las")
+        out = os.path.join(tempfile.mkdtemp(), "two.las")
         pylasr.execute(pylasr.reader_coverage() + pylasr.write_las(out), [EPT, EPT])
         raw = open(out, "rb").read()
         pdrf = raw[104]
         # gpstime is in the fixture's schema, so the intersection of two identical
         # sources must keep it: write_las picks a PDRF that carries gpstime
-        self.assertIn(pdrf, (1, 3, 6, 7, 8, 9, 10))
+        self.assertIn(pdrf, (6, 7, 8, 10))
+        # ept.json declares 73403 points; summarise reports 73396, 7 fewer
         self.assertEqual(struct.unpack_from("<Q", raw, 247)[0], 2 * 73403)
 
 

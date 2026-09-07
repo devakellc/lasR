@@ -55,12 +55,12 @@ bool LASReptreader::process(Header*& header)
   {
     sources[0].second->populate_header(header);
 
-    int64_t npoints = sources[0].second->get_total_points();
+    int64_t npoints = header->number_of_point_records;
     std::vector<Header> others(sources.size() - 1);
     for (size_t i = 1 ; i < sources.size() ; i++)
     {
       sources[i].second->populate_header(&others[i-1]);
-      npoints += sources[i].second->get_total_points();
+      npoints += others[i-1].number_of_point_records;
     }
     header->number_of_point_records = npoints;
 
