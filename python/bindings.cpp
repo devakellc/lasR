@@ -416,6 +416,12 @@ PYBIND11_MODULE(pylasr, m) {
           py::arg("res"), py::arg("operation") = "min",
           py::arg("filter") = std::vector<std::string>{""});
 
+    m.def("keep_latest", &api::keep_latest,
+          "Keep the most recent acquisition where several overlap",
+          py::arg("res") = 5.0, py::arg("window") = 3600.0,
+          py::arg("use_attribute") = "gpstime",
+          py::arg("filter") = std::vector<std::string>{""});
+
     // Sampling
     m.def("sampling_voxel", &api::sampling_voxel,
           "Sample points using voxel-based approach",

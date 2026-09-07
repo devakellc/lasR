@@ -203,6 +203,7 @@ Pipeline focal(std::string connect_uid, double size, std::string fun = "mean", s
 Pipeline hull(std::string ofile = "");
 Pipeline hull_triangulation(std::string connect_uid, std::string ofile = "");
 Pipeline info();
+Pipeline keep_latest(double res = 5, double window = 3600, std::string use_attribute = "gpstime", std::vector<std::string> filter = {""});
 Pipeline load_raster(std::string file, int band = 1L);
 Pipeline load_matrix(std::vector<double> matrix, bool check = true);
 Pipeline local_maximum(double ws, double min_height = 2, std::vector<std::string> filter = {""}, std::string ofile = "", std::string use_attribute = "Z", bool record_attributes = false, std::string store_in_attribute = "");
