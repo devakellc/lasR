@@ -253,5 +253,37 @@ class TestErrorHandling(unittest.TestCase):
             pylasr.classify_with_sor(k="invalid", m="invalid")
 
 
+EPT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "inst", "extdata", "ept-test-multi", "ept.json")
+
+
+def _npoints(result):
+    return sum(e["summary"]["npoints"] for e in result["data"] if "summary" in e)
+
+
+class TestMultipleEptEndpoints(unittest.TestCase):
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+    def test_two_endpoints_read_both(self):
+        one = _npoints(pylasr.execute(
+            pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(
+            pylasr.reader_coverage() + pylasr.summarise(), [EPT, EPT]))
+        self.assertEqual(one, 73396)
+        self.assertEqual(two, 2 * one)
+
+    def test_two_endpoints_under_a_query(self):
+        one = _npoints(pylasr.execute(
+            pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+            + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(
+            pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+            + pylasr.summarise(), [EPT, EPT]))
+        self.assertEqual(one, 16294)
+        self.assertEqual(two, 2 * one)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

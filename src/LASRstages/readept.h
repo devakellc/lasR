@@ -3,12 +3,19 @@
 
 #include "Stage.h"
 
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 class EPTio;
 
 class LASReptreader: public Stage
 {
 public:
   LASReptreader();
+  LASReptreader(const LASReptreader& other);
   ~LASReptreader();
   bool process(Header*& header) override;
   bool process(Point*& point) override;
@@ -24,7 +31,10 @@ public:
 
 private:
   Header* header;
-  EPTio* eptio;
+  // One reader per entry of chunk.main_files. A sequence, not a map: the same
+  // endpoint listed twice is read twice, as a duplicated LAS file is.
+  std::vector<std::pair<std::string, std::unique_ptr<EPTio>>> sources;
+  size_t current_source;
   bool streaming;
 };
 

@@ -589,12 +589,6 @@ bool FileCollection::add_pcd_file(std::string file, bool noprocess)
 
 bool FileCollection::add_ept_endpoint(std::string path, bool noprocess)
 {
-  if (files.size() > 0)
-  {
-    last_error = "Only a single EPT endpoint is supported";
-    return false;
-  }
-
   std::replace(path.begin(), path.end(), '\\', '/');
 
   Header header;
