@@ -344,6 +344,13 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         b = _npoints(pylasr.execute(query + pylasr.summarise(), [las, EPT]))
         self.assertEqual(a, b)
 
+    def test_a_buffered_stage_does_not_index_the_ept(self):
+        # a stage asking for a buffer pulls in the lax writer, which must skip the endpoint
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        pipeline = query + pylasr.sampling_pixel(res=2.0) + pylasr.summarise()
+        self.assertGreater(_npoints(pylasr.execute(pipeline, [EPT, las])), 0)
+
     def test_mismatched_scale_is_refused(self):
         topography = os.path.normpath(os.path.join(os.path.dirname(EPT), "..", "Topography.las"))
         query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])

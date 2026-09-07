@@ -110,6 +110,7 @@ bool LASRlaxwriter::set_chunk(Chunk& chunk)
     for (const auto& file : files)
     {
       if (!success) continue;
+      if (is_ept_endpoint(file)) continue;
 
       try
       {
