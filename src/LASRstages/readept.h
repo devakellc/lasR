@@ -3,7 +3,6 @@
 
 #include "Stage.h"
 
-#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,8 +30,7 @@ public:
 
 private:
   Header* header;
-  // One reader per entry of chunk.main_files. A sequence, not a map: the same
-  // endpoint listed twice is read twice, as a duplicated LAS file is.
+  // One reader per entry of chunk.main_files.
   std::vector<std::pair<std::string, std::unique_ptr<EPTio>>> sources;
   size_t current_source;
   bool streaming;

@@ -133,6 +133,7 @@ bool LASReptreader::process(PointCloud*& las)
       progress->show();
     }
     read += source.second->p_count();
+    if (progress->interrupted()) break;
   }
 
   progress->done();
