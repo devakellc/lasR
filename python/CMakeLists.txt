@@ -238,6 +238,7 @@ pybind11_add_module(pylasr
   ${LASR_SOURCE_DIR}/src/LASRstages/nothing.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/ptd.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/rasterize.cpp
+  ${LASR_SOURCE_DIR}/src/LASRstages/readmixed.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/readlas.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/readpcd.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/readept.cpp

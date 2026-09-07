@@ -314,5 +314,42 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         self.assertEqual(n_two, 2 * n_one)
 
 
+    def _las_from_ept(self):
+        # a LAS written from the EPT inherits its scale and offset, so the two agree
+        las = os.path.join(self.temp_dir, "from_ept.las")
+        pylasr.execute(pylasr.reader_coverage() + pylasr.write_las(las), EPT)
+        return las
+
+    def test_las_and_ept_in_one_collection(self):
+        las = self._las_from_ept()
+        # read file by file the two are one chunk each, so the counts add up. They are not
+        # equal: 7 points sit outside boundsConforming and only the EPT skips them as buffer
+        from_ept = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        from_las = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), las))
+        both = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), [EPT, las]))
+        self.assertEqual(both, from_ept + from_las)
+
+    def test_las_and_ept_merge_in_one_chunk(self):
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        one = _npoints(pylasr.execute(query + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(query + pylasr.summarise(), [EPT, las]))
+        self.assertEqual(two, 2 * one)
+
+    def test_source_order_does_not_matter(self):
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        a = _npoints(pylasr.execute(query + pylasr.summarise(), [EPT, las]))
+        b = _npoints(pylasr.execute(query + pylasr.summarise(), [las, EPT]))
+        self.assertEqual(a, b)
+
+    def test_mismatched_scale_is_refused(self):
+        topography = os.path.normpath(os.path.join(os.path.dirname(EPT), "..", "Topography.las"))
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        with self.assertRaises(Exception) as ctx:
+            pylasr.execute(query + pylasr.summarise(), [EPT, topography])
+        self.assertIn("scale or offset", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
