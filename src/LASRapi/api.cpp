@@ -146,17 +146,6 @@ Pipeline edit_attribute(std::vector<std::string> filter, std::string attribute, 
   return Pipeline(s);
 }
 
-Pipeline keep_latest(double res, double window, std::string use_attribute, std::vector<std::string> filter)
-{
-  Stage s("keep_latest");
-  s.set("res", res);
-  s.set("window", window);
-  s.set("use_attribute", use_attribute);
-  s.set("filter", filter);
-
-  return Pipeline(s);
-}
-
 Pipeline filter_with_grid(double res, std::string operation, std::vector<std::string> filter)
 {
   static const std::vector<std::string> choices = {"min", "max"};
@@ -209,6 +198,17 @@ Pipeline hull_triangulation(std::string connect_uid, std::string ofile)
 Pipeline info()
 {
   Stage s("info");
+
+  return Pipeline(s);
+}
+
+Pipeline keep_latest(double res, double window, std::string use_attribute, std::vector<std::string> filter)
+{
+  Stage s("keep_latest");
+  s.set("res", res);
+  s.set("window", window);
+  s.set("use_attribute", use_attribute);
+  s.set("filter", filter);
 
   return Pipeline(s);
 }

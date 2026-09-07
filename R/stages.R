@@ -463,34 +463,6 @@ edit_attribute = function(filter = "", attribute = "", value = 0) { .APISTAGES$e
 #' @template param-filter
 #' @md
 #' @export
-#' Keep the most recent acquisition
-#'
-#' Where several acquisitions cover the same ground, keep the points of the most recent one and
-#' drop the others. The area is gridded at `res`, the latest value of `use_attribute` is found in
-#' each cell, and a point trailing that value by more than `window` is deleted. A cell reached by
-#' a single acquisition has its own time as the latest, so nothing there is dropped: an older
-#' survey survives where it is the only cover, which a threshold on `gpstime` alone cannot do.
-#'
-#' The acquisitions must reach the same chunk to be compared, which is the case for a query —
-#' \link{reader_polygons} or \link{reader_rectangles}. Reading a collection file by file gives
-#' each file its own chunk and there is nothing to resolve.
-#'
-#' @param res numeric. Size of the cells in which the acquisitions are compared. A large cell is
-#' won entirely by the most recent acquisition, so it trims the older one along the seam.
-#' @param window numeric. How far behind the latest value of a cell a point may be and still
-#' count as the same acquisition. In seconds for `gpstime`.
-#' @param use_attribute character. Attribute that orders the acquisitions.
-#' @template param-filter
-#' @examples
-#' \dontrun{
-#' # two overlapping acquisitions, the newer one wins in the overlap
-#' pipeline <- reader_polygons(aoi) + keep_latest(res = 5) + rasterize(1, "max")
-#' ans <- exec(pipeline, on = c(old, new))
-#' }
-#' @export
-#' @md
-keep_latest = function(res = 5, window = 3600, use_attribute = "gpstime", filter = "") { .APISTAGES$keep_latest(res, window, use_attribute, filter) }
-
 filter_with_grid = function(res, operator = "min", filter = "") { .APISTAGES$filter_with_grid(res, operator, filter) }
 
 #' Calculate focal ("moving window") values for each cell of a raster
@@ -610,6 +582,37 @@ info = function(f)
 #' @export
 #' @rdname add_attribute
 keep_attributes = function(names){ .APISTAGES$keep_attributes(names) }
+
+#' Keep the most recent acquisition
+#'
+#' Where several acquisitions cover the same ground, keep the points of the most recent one and
+#' drop the others. The area is gridded at `res`, the latest value of `use_attribute` is found in
+#' each cell, and a point trailing that value by more than `window` is deleted. A cell reached by
+#' a single acquisition has its own time as the latest, so nothing there is dropped: an older
+#' survey survives where it is the only cover, which a threshold on `gpstime` alone cannot do.
+#' This holds as long as `window` exceeds the duration of one acquisition. Below that, two passes
+#' of the same survey crossing a cell are read as two acquisitions and the earlier one is dropped.
+#'
+#' The acquisitions must reach the same chunk to be compared, which is the case for a query —
+#' \link{reader_polygons} or \link{reader_rectangles}. Reading a collection file by file gives
+#' each file its own chunk and there is nothing to resolve.
+#'
+#' @param res numeric. Size of the cells in which the acquisitions are compared. A large cell is
+#' won entirely by the most recent acquisition, so it trims the older one along the seam.
+#' @param window numeric. How far behind the latest value of a cell a point may be and still
+#' count as the same acquisition. In seconds for `gpstime`. Must be strictly positive and longer
+#' than a single acquisition takes to fly.
+#' @param use_attribute character. Attribute that orders the acquisitions.
+#' @template param-filter
+#' @examples
+#' \dontrun{
+#' # two overlapping acquisitions, the newer one wins in the overlap
+#' pipeline <- reader_polygons(aoi) + keep_latest(res = 5) + rasterize(1, "max")
+#' ans <- exec(pipeline, on = c(old, new))
+#' }
+#' @export
+#' @md
+keep_latest = function(res = 5, window = 3600, use_attribute = "gpstime", filter = "") { .APISTAGES$keep_latest(res, window, use_attribute, filter) }
 
 # ===== L =====
 

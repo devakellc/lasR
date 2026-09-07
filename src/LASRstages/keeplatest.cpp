@@ -16,11 +16,23 @@ bool LASRkeeplatest::set_parameters(const nlohmann::json& stage)
     return false;
   }
 
+  if (window <= 0)
+  {
+    last_error = "the window must be strictly positive";
+    return false;
+  }
+
   return true;
 }
 
 bool LASRkeeplatest::process(PointCloud*& las)
 {
+  if (!las->header->schema.has_attribute(attribute))
+  {
+    last_error = "No attribute '" + attribute + "' found";
+    return false;
+  }
+
   AttributeAccessor accessor(attribute);
 
   Grid grid(las->header->min_x, las->header->min_y, las->header->max_x, las->header->max_y, res);
@@ -35,14 +47,12 @@ bool LASRkeeplatest::process(PointCloud*& las)
     if (t > latest[cell]) latest[cell] = t;
   }
 
-  // A cell reached by a single acquisition has its own time as the latest, so nothing there
-  // is dropped: an older survey survives where it is the only cover
   while (las->read_point())
   {
     if (pointfilter.filter(&las->point)) continue;
 
     int cell = grid.cell_from_xy(las->point.get_x(), las->point.get_y());
-    if (accessor(&las->point) <= latest[cell] - window) las->point.set_deleted();
+    if (latest[cell] - accessor(&las->point) > window) las->point.set_deleted();
   }
 
   las->update_header();
