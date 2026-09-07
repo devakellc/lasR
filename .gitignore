@@ -18,6 +18,7 @@ python/build
 python/pylasr.egg-info
 python/dist
 python/build
+build
 *.bak*
 *.a
 *.pyc

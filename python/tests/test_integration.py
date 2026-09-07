@@ -267,11 +267,18 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         if not PYLASR_AVAILABLE:
             self.skipTest("pylasr not available")
 
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
     def test_two_endpoints_read_both(self):
         one = _npoints(pylasr.execute(
             pylasr.reader_coverage() + pylasr.summarise(), EPT))
         two = _npoints(pylasr.execute(
             pylasr.reader_coverage() + pylasr.summarise(), [EPT, EPT]))
+        # 7 of the tiles' 73403 points fall outside boundsConforming and are skipped as buffer points
         self.assertEqual(one, 73396)
         self.assertEqual(two, 2 * one)
 
@@ -286,15 +293,25 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         self.assertEqual(two, 2 * one)
 
     def test_intersection_keeps_attributes_common_to_all_sources(self):
-        out = os.path.join(tempfile.mkdtemp(), "two.las")
-        pylasr.execute(pylasr.reader_coverage() + pylasr.write_las(out), [EPT, EPT])
-        raw = open(out, "rb").read()
-        pdrf = raw[104]
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        one = os.path.join(self.temp_dir, "one.las")
+        two = os.path.join(self.temp_dir, "two.las")
+        pylasr.execute(query + pylasr.write_las(one), EPT)
+        pylasr.execute(query + pylasr.write_las(two), [EPT, EPT])
+
+        with open(one, "rb") as f:
+            raw_one = f.read()
+        with open(two, "rb") as f:
+            raw_two = f.read()
+
+        pdrf = raw_two[104]
         # gpstime is in the fixture's schema, so the intersection of two identical
         # sources must keep it: write_las picks a PDRF that carries gpstime
         self.assertIn(pdrf, (6, 7, 8, 10))
-        # ept.json declares 73403 points; summarise reports 73396, 7 fewer
-        self.assertEqual(struct.unpack_from("<Q", raw, 247)[0], 2 * 73403)
+
+        n_one = struct.unpack_from("<Q", raw_one, 247)[0]
+        n_two = struct.unpack_from("<Q", raw_two, 247)[0]
+        self.assertEqual(n_two, 2 * n_one)
 
 
 if __name__ == "__main__":

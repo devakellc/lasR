@@ -21,7 +21,6 @@ bool LASReptreader::set_chunk(Chunk& chunk)
 {
   Stage::set_chunk(chunk);
 
-  for (auto& source : sources) source.second->close();
   sources.clear();
   current_source = 0;
 
@@ -47,7 +46,7 @@ bool LASReptreader::set_chunk(Chunk& chunk)
 bool LASReptreader::process(Header*& header)
 {
   if (header != nullptr) return true;
-  if (sources.empty()) { last_error = "no EPT source in this chunk"; return false; }
+  if (sources.empty()) { last_error = "EPT reader requires at least one source in the chunk"; return false; }
 
   header = new Header;
 
@@ -59,8 +58,21 @@ bool LASReptreader::process(Header*& header)
     std::vector<Header> others(sources.size() - 1);
     for (size_t i = 1 ; i < sources.size() ; i++)
     {
-      sources[i].second->populate_header(&others[i-1]);
-      npoints += others[i-1].number_of_point_records;
+      Header& other = others[i-1];
+      sources[i].second->populate_header(&other);
+
+      if (other.x_scale_factor != header->x_scale_factor ||
+          other.y_scale_factor != header->y_scale_factor ||
+          other.z_scale_factor != header->z_scale_factor ||
+          other.x_offset != header->x_offset ||
+          other.y_offset != header->y_offset ||
+          other.z_offset != header->z_offset)
+      {
+        last_error = "EPT endpoints with different scale or offset cannot be merged";
+        return false;
+      }
+
+      npoints += other.number_of_point_records;
     }
     header->number_of_point_records = npoints;
 
@@ -161,8 +173,6 @@ bool LASReptreader::process(PointCloud*& las)
 
 LASReptreader::~LASReptreader()
 {
-  for (auto& source : sources) source.second->close();
-  sources.clear();
 }
 
 void LASReptreader::clear(bool)
