@@ -6,6 +6,7 @@ Integration tests for pylasr using actual data processing workflows
 import os
 import glob
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -252,6 +253,103 @@ class TestErrorHandling(unittest.TestCase):
         with self.assertRaises((TypeError, ValueError)):
             # Try to create a pipeline with invalid parameters
             pylasr.classify_with_sor(k="invalid", m="invalid")
+
+
+EPT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "inst", "extdata", "ept-test-multi", "ept.json")
+
+
+def _npoints(result):
+    return sum(e["summary"]["npoints"] for e in result["data"] if "summary" in e)
+
+
+class TestMultipleEptEndpoints(unittest.TestCase):
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_two_endpoints_read_both(self):
+        one = _npoints(pylasr.execute(
+            pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(
+            pylasr.reader_coverage() + pylasr.summarise(), [EPT, EPT]))
+        # 7 of the tiles' 73403 points fall outside boundsConforming and are skipped as buffer points
+        self.assertEqual(one, 73396)
+        self.assertEqual(two, 2 * one)
+
+    def test_two_endpoints_under_a_query(self):
+        one = _npoints(pylasr.execute(
+            pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+            + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(
+            pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+            + pylasr.summarise(), [EPT, EPT]))
+        self.assertEqual(one, 16294)
+        self.assertEqual(two, 2 * one)
+
+    def test_intersection_keeps_attributes_common_to_all_sources(self):
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        one = os.path.join(self.temp_dir, "one.las")
+        two = os.path.join(self.temp_dir, "two.las")
+        pylasr.execute(query + pylasr.write_las(one), EPT)
+        pylasr.execute(query + pylasr.write_las(two), [EPT, EPT])
+
+        with open(one, "rb") as f:
+            raw_one = f.read()
+        with open(two, "rb") as f:
+            raw_two = f.read()
+
+        pdrf = raw_two[104]
+        # gpstime is in the fixture's schema, so the intersection of two identical
+        # sources must keep it: write_las picks a PDRF that carries gpstime
+        self.assertIn(pdrf, (6, 7, 8, 10))
+
+        n_one = struct.unpack_from("<Q", raw_one, 247)[0]
+        n_two = struct.unpack_from("<Q", raw_two, 247)[0]
+        self.assertEqual(n_two, 2 * n_one)
+
+
+    def _las_from_ept(self):
+        # a LAS written from the EPT inherits its scale and offset, so the two agree
+        las = os.path.join(self.temp_dir, "from_ept.las")
+        pylasr.execute(pylasr.reader_coverage() + pylasr.write_las(las), EPT)
+        return las
+
+    def test_las_and_ept_in_one_collection(self):
+        las = self._las_from_ept()
+        # read file by file the two are one chunk each, so the counts add up. They are not
+        # equal: 7 points sit outside boundsConforming and only the EPT skips them as buffer
+        from_ept = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        from_las = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), las))
+        both = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), [EPT, las]))
+        self.assertEqual(both, from_ept + from_las)
+
+    def test_las_and_ept_merge_in_one_chunk(self):
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        one = _npoints(pylasr.execute(query + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(query + pylasr.summarise(), [EPT, las]))
+        self.assertEqual(two, 2 * one)
+
+    def test_source_order_does_not_matter(self):
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        a = _npoints(pylasr.execute(query + pylasr.summarise(), [EPT, las]))
+        b = _npoints(pylasr.execute(query + pylasr.summarise(), [las, EPT]))
+        self.assertEqual(a, b)
+
+    def test_mismatched_scale_is_refused(self):
+        topography = os.path.normpath(os.path.join(os.path.dirname(EPT), "..", "Topography.las"))
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        with self.assertRaises(Exception) as ctx:
+            pylasr.execute(query + pylasr.summarise(), [EPT, topography])
+        self.assertIn("scale or offset", str(ctx.exception))
 
 
 if __name__ == "__main__":
