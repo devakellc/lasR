@@ -793,60 +793,58 @@ size_t FileCollection::estimate_points(double qxmin, double qymin, double qxmax,
 {
   density_nodes.clear();
 
-  // An EPT hierarchy knows exactly how many points the nodes of a query hold
-  if (headers.size() == 1 && headers[0].signature == "EPTF")
+  double npoints = 0;
+  for (size_t i = 0 ; i < headers.size() ; i++)
   {
-    try
+    const Header& h = headers[i];
+    if (h.max_x < qxmin - buffer || h.min_x > qxmax + buffer || h.max_y < qymin - buffer || h.min_y > qymax + buffer)
+      continue;
+
+    // An EPT header counts no point. Its hierarchy knows exactly how many the nodes of a query hold
+    if (h.signature == "EPTF")
     {
-      EPTio reader;
-      reader.open(files[0].string());
-      reader.query({files[0].string()}, {}, qxmin, qymin, qxmax, qymax, 0, false, {});
-      for (const auto& n : reader.get_queried_nodes())
-        density_nodes.push_back({n.xmin, n.ymin, n.xmax, n.ymax, n.npoints});
-      return reader.get_queried_points();
+      try
+      {
+        EPTio reader;
+        reader.open(files[i].string());
+        reader.query({files[i].string()}, {}, qxmin, qymin, qxmax, qymax, 0, false, {});
+        for (const auto& n : reader.get_queried_nodes())
+          density_nodes.push_back({n.xmin, n.ymin, n.xmax, n.ymax, n.npoints});
+        npoints += reader.get_queried_points();
+        continue;
+      }
+      catch (const std::exception&)
+      {
+        // fall back on the header
+      }
     }
-    catch (const std::exception&)
-    {
-      density_nodes.clear();
-      // fall back on the headers
-    }
+
+    // Elsewhere the points of a file are assumed to spread evenly over its bounding box
+    density_nodes.push_back({h.min_x, h.min_y, h.max_x, h.max_y, (size_t)h.number_of_point_records});
+
+    double area = (h.max_x - h.min_x) * (h.max_y - h.min_y);
+    double ox = MIN(qxmax, h.max_x) - MAX(qxmin, h.min_x);
+    double oy = MIN(qymax, h.max_y) - MAX(qymin, h.min_y);
+    if (area > 0 && ox > 0 && oy > 0) npoints += (double)h.number_of_point_records * (ox*oy) / area;
   }
 
-  return count_points(qxmin, qymin, qxmax, qymax);
+  return (size_t)npoints;
 }
 
 size_t FileCollection::count_points(double qxmin, double qymin, double qxmax, double qymax) const
 {
   // Counting a straddling node whole would make a clipped border tile the densest thing around
-  if (!density_nodes.empty())
-  {
-    double npoints = 0;
-    for (const auto& n : density_nodes)
-    {
-      double area = (n.xmax - n.xmin)*(n.ymax - n.ymin);
-      if (area <= 0) continue;
-
-      double ox = MIN(qxmax, n.xmax) - MAX(qxmin, n.xmin);
-      double oy = MIN(qymax, n.ymax) - MAX(qymin, n.ymin);
-      if (ox <= 0 || oy <= 0) continue;
-
-      npoints += (double)n.npoints * (ox*oy) / area;
-    }
-    return (size_t)npoints;
-  }
-
-  // Elsewhere the points of a file are assumed to spread evenly over its bounding box
   double npoints = 0;
-  for (const auto& h : headers)
+  for (const auto& n : density_nodes)
   {
-    double area = (h.max_x - h.min_x) * (h.max_y - h.min_y);
-    if (area <= 0 || h.number_of_point_records == 0) continue;
+    double area = (n.xmax - n.xmin)*(n.ymax - n.ymin);
+    if (area <= 0) continue;
 
-    double ox = MIN(qxmax, h.max_x) - MAX(qxmin, h.min_x);
-    double oy = MIN(qymax, h.max_y) - MAX(qymin, h.min_y);
+    double ox = MIN(qxmax, n.xmax) - MAX(qxmin, n.xmin);
+    double oy = MIN(qymax, n.ymax) - MAX(qymin, n.ymin);
     if (ox <= 0 || oy <= 0) continue;
 
-    npoints += (double)h.number_of_point_records * (ox*oy) / area;
+    npoints += (double)n.npoints * (ox*oy) / area;
   }
 
   return (size_t)npoints;
