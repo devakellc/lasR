@@ -70,6 +70,7 @@ RCPP_MODULE(stages)
   function("load_matrix", &api::load_matrix, "Load a 4x4 matrix");
   function("local_maximum", &api::local_maximum, "Local maximum filter on a point cloud");
   function("local_maximum_raster", &api::local_maximum_raster, "Local maximum filter on a raster");
+  function("multichm", &api::multichm, "Individual tree detection on a multi CHM");
   function("neighborhood_metrics", &nonapi::neighborhood_metrics, "Local metrics");
   function("nothing", &nonapi::nothing, "A debugging stage");
   function("pit_fill", &api::pit_fill, "CHM enhancement");

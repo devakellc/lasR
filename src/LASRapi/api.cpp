@@ -252,6 +252,23 @@ Pipeline local_maximum_raster(std::string connect_uid, double ws, double min_hei
   return Pipeline(s);
 }
 
+Pipeline multichm(double res, double ws, double min_height, double layer_thickness, double dist_2d, double dist_3d, bool use_max, std::vector<std::string> filter, std::string ofile)
+{
+  Stage s("multichm");
+  s.set("res", res);
+  s.set("ws", ws);
+  s.set("min_height", min_height);
+  s.set("layer_thickness", layer_thickness);
+  s.set("dist_2d", dist_2d);
+  s.set("dist_3d", dist_3d);
+  s.set("use_max", use_max);
+  s.set("filter", filter);
+  s.set("output", ofile);
+  s.set_vector();
+
+  return Pipeline(s);
+}
+
 Pipeline pit_fill(std::string connect_uid, int lap_size, double thr_lap, double thr_spk, int med_size, int dil_radius, std::string ofile)
 {
   Stage s("pit_fill");

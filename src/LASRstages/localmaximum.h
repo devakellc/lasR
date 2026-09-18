@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <memory>
 
-class LASRlocalmaximum : public StageVector
+class LASRlocalmaximum : public StageVector, public StageMaxima
 {
 public:
   LASRlocalmaximum();
@@ -22,7 +22,7 @@ public:
   bool connect(const std::list<std::unique_ptr<Stage>>&, const std::string& uuid) override;
   bool set_parameters(const nlohmann::json&) override;
   std::string get_name() const override { return "local_maximum"; }
-  std::vector<PointLAS>& get_maxima() { return lm; };
+  std::vector<PointLAS>& get_maxima() override { return lm; };
   bool is_parallelized() const override { return true; };
 
   // multi-threading

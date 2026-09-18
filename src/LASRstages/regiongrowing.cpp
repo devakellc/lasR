@@ -1,5 +1,4 @@
 #include "regiongrowing.h"
-#include "localmaximum.h"
 #include "Shape.h"
 
 #include <array>
@@ -40,38 +39,41 @@ bool LASRregiongrowing::process(PointCloud*& las)
 
   // We do not know, in the map, which pointer is the pointer to the seeds and which one
   // is the pointer to the raster because the map is ordered by UID.
-  LASRlocalmaximum* lmf = nullptr;
+  Stage* seed_stage = nullptr;
+  StageMaxima* seeds = nullptr;
   StageRaster* rst = nullptr;
-  auto it1 = connections.begin();
-  auto it2 = --connections.end();
-  lmf = dynamic_cast<LASRlocalmaximum*>(it1->second);
-  if (lmf == nullptr)
+  for (auto& elem : connections)
   {
-    lmf = dynamic_cast<LASRlocalmaximum*>(it2->second);
-    rst = dynamic_cast<StageRaster*>(it1->second);
-  }
-  else
-  {
-    rst = dynamic_cast<StageRaster*>(it2->second);
+    StageMaxima* maxima = dynamic_cast<StageMaxima*>(elem.second);
+    if (maxima)
+    {
+      seeds = maxima;
+      seed_stage = elem.second;
+    }
+    else
+    {
+      StageRaster* raster = dynamic_cast<StageRaster*>(elem.second);
+      if (raster) rst = raster;
+    }
   }
 
-  if (lmf == nullptr || rst == nullptr)
+  if (seeds == nullptr || rst == nullptr)
   {
-    last_error = "invalid pointers: must be 'LASRlocalmaximum' and 'StageRaster'. Please report this error."; // # nocov
+    last_error = "invalid pointers: must be a tree top stage and a 'StageRaster'. Please report this error."; // # nocov
     return false; // # nocov
   }
 
-  // Test if the lmf was computed on a point cloud. If there is no connection it means local maximum was not connected
+  // Test if the seeds were computed on a point cloud. If there is no connection it means local maximum was not connected
   // to a raster stage and was applied on the point cloud. If there is a connection it means it was computed on a raster
-  // we must check if it was computed on the raster we are processing. A possible user error might be to compute lmf on a raster
+  // we must check if it was computed on the raster we are processing. A possible user error might be to compute the seeds on a raster
   // then process the raster with e.g. pit_fill then feed growing region with pit_fill but proving seeds from the raw chm.
-  if (lmf->get_connection().size() == 0)
+  if (seed_stage->get_connection().size() == 0)
   {
     warning("computing region_growing on a raster but seeds were found using the point cloud\n");
   }
   else
   {
-    const Raster& ref_rast = ((StageRaster*)lmf->get_connection().begin()->second)->get_raster();
+    const Raster& ref_rast = ((StageRaster*)seed_stage->get_connection().begin()->second)->get_raster();
     const Raster& this_rast = rst->get_raster();
 
     if (&ref_rast != &this_rast)
@@ -84,7 +86,7 @@ bool LASRregiongrowing::process(PointCloud*& las)
   progress->set_prefix("growing region");
   progress->set_total(raster.get_ncells());
 
-  const std::vector<PointLAS>& lm = lmf->get_maxima();
+  const std::vector<PointLAS>& lm = seeds->get_maxima();
   const Raster& image = rst->get_raster();
 
   struct Region
@@ -177,16 +179,14 @@ bool LASRregiongrowing::connect(const std::list<std::unique_ptr<Stage>>& pipelin
 
   if (s == nullptr) return false;
 
-  LASRlocalmaximum* p = dynamic_cast<LASRlocalmaximum*>(s);
+  StageMaxima* p = dynamic_cast<StageMaxima*>(s);
   StageRaster* q = dynamic_cast<StageRaster*>(s);
 
-  if (p)
-    set_connection(p);
-  else if(q)
-    set_connection(q);
+  if (p || q)
+    set_connection(s);
   else
   {
-    last_error = "Incompatible stage combination for 'region_growning'"; // # nocov
+    last_error = "Incompatible stage combination for 'region_growing'"; // # nocov
     return false; // # nocov
   }
 

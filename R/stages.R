@@ -712,6 +712,48 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
   .APISTAGES$local_maximum_raster(connect = info[["uid"]], ws, min_height, filter, ofile)
 }
 
+# ===== M ====
+
+#' Multi CHM Individual Tree Detection
+#'
+#' Individual tree detection based on a multi canopy height model by Eysn et al. (2015) (see
+#' references). A CHM is built from the 95th percentile of the heights in each cell and its
+#' local maxima are recorded. The points lying in a band of `layer_thickness` below this CHM are then
+#' removed and the operation is repeated until the point cloud is empty. The candidates are finally
+#' sorted by decreasing height and retained one by one if no already retained tree lies within
+#' `dist_2d` in 2D and `dist_3d` in 3D.
+#'
+#' @param res numeric. Resolution of the intermediate CHMs.
+#' @param ws numeric. Diameter of the circular moving window used to detect the local maxima on each CHM.
+#' @param min_height numeric. Threshold below which a local maximum cannot be a tree.
+#' @param layer_thickness numeric. Thickness of the band removed below the current CHM at each iteration.
+#' @param dist_2d numeric. 2D distance threshold below which a candidate is discarded.
+#' @param dist_3d numeric. 3D distance threshold below which a candidate is discarded.
+#' @param use_max logical. Use the max instead of the 95th percentile to build the CHMs. Faster but the
+#' recorded heights are no longer true percentiles.
+#'
+#' @template param-filter
+#' @template param-ofile
+#'
+#' @template return-vector
+#'
+#' @references
+#' Eysn, L., Hollaus, M., Lindberg, E., Berger, F., Monnet, J. M., Dalponte, M., ... Pfeifer, N. (2015).
+#' A benchmark of lidar-based single tree detection methods using heterogeneous forest data from the
+#' Alpine Space. Forests, 6(5), 1721-1747.
+#'
+#' @examples
+#' f <- system.file("extdata", "MixedConifer.las", package = "lasR")
+#' ans <- exec(reader() + multichm(res = 1, ws = 5), on = f)
+#' ans
+#' @export
+#' @md
+multichm = function(res = 1, ws = 3, min_height = 2, layer_thickness = 0.5, dist_2d = 3, dist_3d = 5, use_max = FALSE, filter = "", ofile = tempgpkg())
+{
+  ofile = normalizePath(ofile, mustWork = FALSE)
+  .APISTAGES$multichm(res, ws, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile)
+}
+
 # ===== N ====
 
 #' Compute metrics for a neighborhood
@@ -737,7 +779,7 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 #'
 #' @param metrics Character vector. "min", "max" and "count" are accepted as well as many others
 #' (see \link{metric_engine}). If `NULL` nothing is computed.
-#' @param neighborhood Currently support only a "local_maximum" stage.
+#' @param neighborhood A stage producing tree tops, i.e. "local_maximum" or "multichm".
 #' @param k,r integer and numeric respectively for k-nearest neighbours and radius of the neighborhood
 #' sphere. If k is given and r is missing, computes with the knn, if r is given and k is missing
 #' computes with a sphere neighborhood, if k and r are given computes with the knn and a limit on the
@@ -757,7 +799,7 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 neighborhood_metrics = function(neighborhood, metrics, k = 10, r = 0, ofile = tempgpkg())
 {
   nn = .APIOPERATIONS$get_stage_info(neighborhood)
-  if (nn$name != "local_maximum") stop("the stage must be a local_maximum stage")
+  if (!nn$name %in% c("local_maximum", "multichm")) stop("the stage must be a stage producing tree tops")
   ofile = normalizePath(ofile, mustWork = FALSE)
   .APISTAGES$neighborhood_metrics(nn[["uid"]], metrics, k, r, ofile)
 }

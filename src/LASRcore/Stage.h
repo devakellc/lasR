@@ -222,6 +222,15 @@ protected:
   Vector vector;
 };
 
+// Interface for stages that produce tree tops. Segmentation stages take their seeds
+// through it, so any detector implementing it is accepted.
+class StageMaxima
+{
+public:
+  virtual ~StageMaxima() = default;
+  virtual std::vector<PointLAS>& get_maxima() = 0;
+};
+
 class StageMatrix : public Stage
 {
 public:

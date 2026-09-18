@@ -210,6 +210,11 @@ class TestGeometricAnalysis(unittest.TestCase):
         )
         self.assertIsInstance(pipeline, pylasr.Pipeline)
 
+    def test_multichm(self):
+        """Test multichm pipeline creation"""
+        pipeline = pylasr.multichm(res=1.0, ws=5.0, min_height=2.0)
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
     def test_callback(self):
         """Test callback pipeline creation"""
         def passthrough(data):
