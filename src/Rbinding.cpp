@@ -74,6 +74,7 @@ RCPP_MODULE(stages)
   function("neighborhood_metrics", &nonapi::neighborhood_metrics, "Local metrics");
   function("nothing", &nonapi::nothing, "A debugging stage");
   function("pit_fill", &api::pit_fill, "CHM enhancement");
+  function("random_walker", &api::random_walker, "Random walker tree segmentation");
   function("rasterize", &api::rasterize, "Rasterize point cloud");
   function("rasterize_triangulation", &api::rasterize_triangulation, "Rasterize a triangulation");
   function("reader_coverage", &api::reader_coverage, "Read points coverage");

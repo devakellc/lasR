@@ -284,6 +284,21 @@ Pipeline pit_fill(std::string connect_uid, int lap_size, double thr_lap, double 
   return Pipeline(s);
 }
 
+Pipeline random_walker(std::string connect_uid_raster, std::string connect_uid_seeds, double th_tree, double th_cr, double max_cr, double beta, std::string ofile)
+{
+  Stage s("random_walker");
+  s.set("connect1", connect_uid_raster);
+  s.set("connect2", connect_uid_seeds);
+  s.set("th_tree", th_tree);
+  s.set("th_cr", th_cr);
+  s.set("max_cr", max_cr);
+  s.set("beta", beta);
+  s.set("output", ofile);
+  s.set_raster();
+
+  return Pipeline(s);
+}
+
 Pipeline rasterize(double res, double window, std::vector<std::string> operators, std::vector<std::string> filter, std::string ofile, double default_value)
 {
   Stage s("rasterize");

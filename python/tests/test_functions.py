@@ -215,6 +215,13 @@ class TestGeometricAnalysis(unittest.TestCase):
         pipeline = pylasr.multichm(res=1.0, ws=5.0, min_height=2.0)
         self.assertIsInstance(pipeline, pylasr.Pipeline)
 
+    def test_random_walker(self):
+        """Test random_walker pipeline creation"""
+        chm = pylasr.rasterize(res=1.0, window=1.0, operators=["max"])
+        seeds = pylasr.local_maximum_raster(chm, ws=5)
+        pipeline = pylasr.random_walker(chm, seeds, max_cr=10.0)
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
     def test_callback(self):
         """Test callback pipeline creation"""
         def passthrough(data):

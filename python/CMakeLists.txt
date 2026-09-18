@@ -237,6 +237,7 @@ pybind11_add_module(pylasr
   ${LASR_SOURCE_DIR}/src/LASRstages/nnmetrics.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/nothing.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/ptd.cpp
+  ${LASR_SOURCE_DIR}/src/LASRstages/randomwalker.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/rasterize.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/readlas.cpp
   ${LASR_SOURCE_DIR}/src/LASRstages/readpcd.cpp

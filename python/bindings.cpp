@@ -505,6 +505,17 @@ PYBIND11_MODULE(pylasr, m) {
     "Compute hull from triangulation",
     py::arg("connect_uid"), py::arg("ofile") = "");
 
+    // Random walker
+    m.def("random_walker", [](py::object connect_uid_raster, py::object connect_uid_seeds, double th_tree, double th_cr, double max_cr, double beta, std::string ofile) {
+        std::string uid_raster = extract_uid(connect_uid_raster);
+        std::string uid_seeds = extract_uid(connect_uid_seeds);
+        return api::random_walker(uid_raster, uid_seeds, th_tree, th_cr, max_cr, beta, ofile);
+    },
+    "Perform random walker segmentation",
+    py::arg("connect_uid_raster"), py::arg("connect_uid_seeds"),
+    py::arg("th_tree") = 2.0, py::arg("th_cr") = 0.55,
+    py::arg("max_cr") = 20.0, py::arg("beta") = 1.0, py::arg("ofile") = "");
+
     // Region growing
     m.def("region_growing", [](py::object connect_uid_raster, py::object connect_uid_seeds, double th_tree, double th_seed, double th_cr, double max_cr, std::string ofile) {
         std::string uid_raster = extract_uid(connect_uid_raster);

@@ -854,6 +854,56 @@ pit_fill = function(raster, lap_size = 3L, thr_lap = 0.1, thr_spk = -0.1, med_si
 
 # ===== R =====
 
+#' Random walker
+#'
+#' Random walker segmentation of individual trees based on Grady (2006) algorithm (see reference).
+#' Each seed is a marker and each pixel of the canopy is assigned to the marker that a random walker
+#' released from this pixel is the most likely to reach first. The probabilities are obtained by
+#' solving a Dirichlet problem on the graph of the pixels, where the weight of an edge decreases with
+#' the difference of height between the two pixels. This is not a growing algorithm: without a stop
+#' criterion the crowns tile the whole canopy, so `th_cr` truncates each crown at a fraction of the
+#' height of its own apex like in \link{region_growing}.
+#'
+#' @param raster LASRalgoritm. A stage producing a raster.
+#' @param seeds LASRalgoritm. A stage producing points used as seeds.
+#' @param th_tree numeric. Threshold below which a pixel cannot be a tree. Default is 2.
+#' @param th_cr numeric. A pixel assigned to a tree is discarded if its height is lower than the
+#' height of the apex of this tree multiplied by this value. It should be between 0 and 1. Use 0 to
+#' get the original algorithm, which labels every pixel of the canopy. Default is 0.55.
+#' @param max_cr numeric. Maximum value of the crown diameter of a detected tree **(in data units)**.
+#' A tree cannot be assigned a pixel farther than `max_cr/2`. Default is 20.
+#' @param beta numeric. Weight of an edge of the graph. The heights are normalized between 0 and 1
+#' before computing the weights, so that `beta` does not depend on the range of the heights. With
+#' `beta = 0` all the edges are equivalent and the walker ignores the canopy. Default is 1.
+#' @template param-ofile
+#'
+#' @template return-raster
+#'
+#' @references
+#' Grady, L. (2006). Random walks for image segmentation. IEEE Transactions on Pattern Analysis and
+#' Machine Intelligence, 28(11), 1768-1783. doi:10.1109/TPAMI.2006.233
+#'
+#' @export
+#'
+#' @examples
+#' f <- system.file("extdata", "MixedConifer.las", package="lasR")
+#'
+#' reader <- reader(filter = keep_first())
+#' chm <- rasterize(1, "max")
+#' lmx <- local_maximum_raster(chm, 5)
+#' tree <- random_walker(chm, lmx, max_cr = 10)
+#' u <- exec(reader + chm + lmx + tree, on = f)
+#'
+#' # terra::plot(u$random_walker, col = rainbow(150))
+#' @md
+random_walker = function(raster, seeds, th_tree = 2, th_cr = 0.55, max_cr = 20, beta = 1, ofile = temptif())
+{
+  rinfo = .APIOPERATIONS$get_stage_info(raster)
+  sinfo = .APIOPERATIONS$get_stage_info(seeds)
+  ofile = normalizePath(ofile, mustWork = FALSE)
+  .APISTAGES$random_walker(rinfo[["uid"]], sinfo[["uid"]], th_tree, th_cr, max_cr, beta, ofile)
+}
+
 #' Rasterize a point cloud
 #'
 #' Rasterize a point cloud using different approaches. This stage does not modify the point cloud.

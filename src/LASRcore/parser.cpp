@@ -23,6 +23,7 @@
 #include "nothing.h"
 #include "ptd.h"
 #include "pitfill.h"
+#include "randomwalker.h"
 #include "rasterize.h"
 #include "sampling.h"
 #include "spikefree.h"
@@ -393,6 +394,16 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
             ymax = temp_ymax;
           }
         }
+      }
+      else if (name  == "random_walker")
+      {
+        std::string uid1 = stage.at("connect1");
+        std::string uid2 = stage.at("connect2");
+        auto v = std::make_unique<LASRrandomwalker>();
+        bool b1 = v->connect(pipeline, uid1);
+        bool b2 = v->connect(pipeline, uid2);
+        if (!b1 || !b2) return false;
+        pipeline.push_back(std::move(v));
       }
       else if (name  == "region_growing")
       {

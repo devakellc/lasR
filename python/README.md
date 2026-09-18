@@ -149,6 +149,7 @@ pipeline.set_nested_strategy(ncores1=2, ncores2=4)
 - `hulls()` - Compute convex hulls
 
 ### Segmentation & Tree Detection
+- `random_walker()` - Random walker segmentation for tree detection
 - `region_growing()` - Region growing segmentation for tree detection
 
 ### Data Loading & Transformation

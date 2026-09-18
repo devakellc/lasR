@@ -209,6 +209,7 @@ Pipeline local_maximum(double ws, double min_height = 2, std::vector<std::string
 Pipeline local_maximum_raster(std::string connect_uid, double ws, double min_height = 2, std::vector<std::string> filter = {""}, std::string ofile = "");
 Pipeline multichm(double res = 1, double ws = 3, double min_height = 2, double layer_thickness = 0.5, double dist_2d = 3, double dist_3d = 5, bool use_max = false, std::vector<std::string> filter = {""}, std::string ofile = "");
 Pipeline pit_fill(std::string connect_uid, int lap_size = 3, double thr_lap = 0.1, double thr_spk = -0.1, int med_size = 3, int dil_radius = 0, std::string ofile = "");
+Pipeline random_walker(std::string connect_uid_raster, std::string connect_uid_seeds, double th_tree = 2, double th_cr = 0.55, double max_cr = 20, double beta = 1, std::string ofile = "");
 Pipeline rasterize(double res, double window, std::vector<std::string> operators = {"max"}, std::vector<std::string> filter = {""}, std::string ofile = "", double default_value = -99999);
 Pipeline rasterize_triangulation(std::string connect_uid, double res, std::string ofile = "");
 Pipeline reader_coverage(std::vector<std::string> filter = {""}, std::string select = "*", int depth = -1);
