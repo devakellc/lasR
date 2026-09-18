@@ -642,19 +642,21 @@ bool FileCollection::add_ept_endpoint(std::string path, bool noprocess)
   std::replace(path.begin(), path.end(), '\\', '/');
 
   Header header;
-  EPTio reader;
+  auto reader = std::make_unique<EPTio>();
 
   try
   {
-    reader.open(path);
-    reader.populate_header(&header);
-    reader.close();
+    reader->open(path);
+    reader->populate_header(&header);
   }
   catch (const std::exception& e)
   {
     last_error = e.what();
     return false;
   }
+
+  // Left open: estimate_points() queries it directly instead of re-parsing ept.json each time
+  ept_reader = std::move(reader);
 
   add_header(header, noprocess);
   files.push_back(path);
@@ -801,16 +803,14 @@ size_t FileCollection::estimate_points(double qxmin, double qymin, double qxmax,
       continue;
 
     // An EPT header counts no point. Its hierarchy knows exactly how many the nodes of a query hold
-    if (h.signature == "EPTF")
+    if (h.signature == "EPTF" && ept_reader)
     {
       try
       {
-        EPTio reader;
-        reader.open(files[i].string());
-        reader.query({files[i].string()}, {}, qxmin, qymin, qxmax, qymax, 0, false, {});
-        for (const auto& n : reader.get_queried_nodes())
+        ept_reader->query({files[i].string()}, {}, qxmin, qymin, qxmax, qymax, buffer, false, {});
+        for (const auto& n : ept_reader->get_queried_nodes())
           density_nodes.push_back({n.xmin, n.ymin, n.xmax, n.ymax, n.npoints});
-        npoints += reader.get_queried_points();
+        npoints += ept_reader->get_queried_points();
         continue;
       }
       catch (const std::exception&)

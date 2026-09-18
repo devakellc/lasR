@@ -16,6 +16,7 @@
 enum PathType {DIRECTORY, VPCFILE, LASFILE, LAXFILE, PCDFILE, OTHERFILE, MISSINGFILE, UNKNOWNFILE, DATAFRAME, XPTR, REMOTELASFILE, EPTFILE, REMOTEEPTFILE};
 
 class Header;
+class EPTio;
 
 class FileCollectionIndex
 {
@@ -115,6 +116,9 @@ private:
   // Nodes of the last EPT estimate, so a tile is counted in memory instead of traversed again
   struct DensityNode { double xmin, ymin, xmax, ymax; size_t npoints; };
   std::vector<DensityNode> density_nodes;
+
+  // Kept open by add_ept_endpoint so estimate_points can query it without re-parsing ept.json
+  std::unique_ptr<EPTio> ept_reader;
 
   // area of interest clipping every chunk. Shared because each thread copies the Engine and thus
   // the chunks it works on
