@@ -147,14 +147,27 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
   k.assign(ncells, 0);
   offset.assign(ncells+1, 0);
 
-  Point p;
-  p.set_schema(&las->header->schema);
+  // Decode and filter each point once; the scatter below reuses (cell, z) instead of
+  // calling get_point() and cell_from_xy() again
+  std::vector<int32_t> cell_of(las->npoints, -1);
+  std::vector<float> zval(las->npoints);
 
-  for (size_t i = 0 ; i < las->npoints ; i++)
+  #pragma omp parallel num_threads(ncpu)
   {
-    if (!las->get_point(i, &p, &pointfilter)) continue;
-    int cell = grid.cell_from_xy(p.get_x(), p.get_y());
-    if (cell >= 0) offset[cell+1]++;
+    Point p;
+    p.set_schema(&las->header->schema);
+
+    #pragma omp for
+    for (size_t i = 0 ; i < las->npoints ; i++)
+    {
+      if (!las->get_point(i, &p, &pointfilter)) continue;
+      int cell = grid.cell_from_xy(p.get_x(), p.get_y());
+      if (cell < 0) continue;
+      cell_of[i] = cell;
+      zval[i] = (float)p.get_z();
+      #pragma omp atomic
+      offset[cell+1]++;
+    }
   }
 
   for (int c = 0 ; c < ncells ; c++) offset[c+1] += offset[c];
@@ -164,9 +177,8 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
 
   for (size_t i = 0 ; i < las->npoints ; i++)
   {
-    if (!las->get_point(i, &p, &pointfilter)) continue;
-    int cell = grid.cell_from_xy(p.get_x(), p.get_y());
-    if (cell >= 0) z[cursor[cell]++] = (float)p.get_z();
+    int cell = cell_of[i];
+    if (cell >= 0) z[cursor[cell]++] = zval[i];
   }
 
   #pragma omp parallel for num_threads(ncpu)
