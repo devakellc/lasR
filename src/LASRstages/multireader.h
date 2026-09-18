@@ -25,8 +25,9 @@ public:
   void clear(bool) override;
 
 protected:
-  // One reader per source of the chunk
-  std::vector<std::pair<std::string, std::unique_ptr<Fileio>>> sources;
+  // One reader per source of the chunk. shared_ptr (not unique_ptr) so a subclass can keep
+  // a source open across chunks, e.g. to avoid re-opening the same EPT endpoint every time
+  std::vector<std::pair<std::string, std::shared_ptr<Fileio>>> sources;
   virtual bool build_sources(Chunk& chunk) = 0;
 
 private:

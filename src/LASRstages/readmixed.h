@@ -3,6 +3,12 @@
 
 #include "multireader.h"
 
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+class EPTio;
+
 class LASRmixedreader: public LASRmultireader
 {
 public:
@@ -13,6 +19,11 @@ public:
 
 protected:
   bool build_sources(Chunk& chunk) override;
+
+private:
+  // Endpoints stay open across chunks so a query only re-parses ept.json and
+  // re-probes the hierarchy once per endpoint, not once per chunk
+  std::unordered_map<std::string, std::shared_ptr<EPTio>> ept_cache;
 };
 
 #endif

@@ -29,7 +29,7 @@ bool LASRmixedreader::build_sources(Chunk& chunk)
   // LASio merges the LAS files and reconciles their scale and offset, so it is the reference
   if (!las_files.empty() || !las_neighbours.empty())
   {
-    auto lasio = std::unique_ptr<LASio>(new LASio());
+    auto lasio = std::shared_ptr<LASio>(new LASio());
     lasio->query(las_files, las_neighbours, chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax,
                  chunk.buffer, chunk.shape == ShapeType::CIRCLE, filters);
     sources.emplace_back(las_files.empty() ? las_neighbours[0] : las_files[0], std::move(lasio));
@@ -37,10 +37,14 @@ bool LASRmixedreader::build_sources(Chunk& chunk)
 
   for (const auto& endpoint : ept_endpoints)
   {
-    auto eptio = std::unique_ptr<EPTio>(new EPTio());
+    std::shared_ptr<EPTio>& eptio = ept_cache[endpoint];
+    if (!eptio) eptio = std::shared_ptr<EPTio>(new EPTio());
+
+    // An endpoint already in the cache is already opened: query() only re-traverses the
+    // hierarchy for the new extent, it does not re-parse ept.json or re-probe a tile
     eptio->query(endpoint, chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax,
                  chunk.buffer, chunk.shape == ShapeType::CIRCLE, filters);
-    sources.emplace_back(endpoint, std::move(eptio));
+    sources.emplace_back(endpoint, eptio);
   }
 
   return true;
