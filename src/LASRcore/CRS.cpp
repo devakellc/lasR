@@ -146,9 +146,6 @@ bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& 
 {
   if (!source.is_valid() || !target.is_valid()) return false;
 
-  // Nothing to do for an empty/unset extent.
-  if (xmin > xmax || ymin > ymax) return true;
-
   OGRSpatialReference oSourceSRS = source.get_crs();
   OGRSpatialReference oTargetSRS = target.get_crs();
 
@@ -162,6 +159,18 @@ bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& 
   CPLPopErrorHandler();
 
   if (ct == nullptr) return false;
+
+  bool ok = reproject_bbox(ct, xmin, ymin, xmax, ymax);
+  OGRCoordinateTransformation::DestroyCT(ct);
+  return ok;
+}
+
+bool reproject_bbox(OGRCoordinateTransformation* ct, double& xmin, double& ymin, double& xmax, double& ymax)
+{
+  if (ct == nullptr) return false;
+
+  // Nothing to do for an empty/unset extent.
+  if (xmin > xmax || ymin > ymax) return true;
 
   const int N = 8; // number of samples per edge
   std::vector<double> xs;
@@ -182,7 +191,6 @@ bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& 
 
   std::vector<int> ok(xs.size(), 0);
   ct->Transform((int)xs.size(), xs.data(), ys.data(), nullptr, ok.data());
-  OGRCoordinateTransformation::DestroyCT(ct);
 
   double nxmin = std::numeric_limits<double>::max();
   double nymin = std::numeric_limits<double>::max();

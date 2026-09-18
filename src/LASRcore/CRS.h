@@ -34,6 +34,9 @@ private:
 // rather than only at the four corners. Returns false if the CRS are invalid, the
 // transformation cannot be built, or no sample reprojects (the box is entirely outside the
 // transform domain). An empty/unset box (min > max) is left unchanged and returns true.
+// Builds and destroys its own transformation; a caller reprojecting many boxes between the
+// same pair of CRS should keep one and call the other overload instead.
 bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& ymin, double& xmax, double& ymax);
+bool reproject_bbox(OGRCoordinateTransformation* ct, double& xmin, double& ymin, double& xmax, double& ymax);
 
 #endif
