@@ -322,12 +322,13 @@ class TestMultipleEptEndpoints(unittest.TestCase):
 
     def test_las_and_ept_in_one_collection(self):
         las = self._las_from_ept()
-        # read file by file the two are one chunk each, so the counts add up. They are not
-        # equal: 7 points sit outside boundsConforming and only the EPT skips them as buffer
+        # EPT and las cover the same extent, so file by file each is a neighbour of the
+        # other's chunk (as any two overlapping LAS files already are) and both get read
+        # twice: once as its own chunk's main file, once as the other chunk's neighbour
         from_ept = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), EPT))
         from_las = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), las))
         both = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), [EPT, las]))
-        self.assertEqual(both, from_ept + from_las)
+        self.assertEqual(both, 2 * (from_ept + from_las))
 
     def test_las_and_ept_merge_in_one_chunk(self):
         las = self._las_from_ept()
@@ -356,6 +357,29 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             pylasr.execute(query + pylasr.summarise(), [EPT, topography])
         self.assertIn("scale or offset", str(ctx.exception))
+
+    def test_write_lax_skips_ept_endpoints_called_directly(self):
+        # write_lax(), called directly rather than auto-inserted for a buffered stage,
+        # always runs the eager process(FileCollection*&) path (onthefly=false) and used
+        # to LAS-open every entry including an ept.json, failing with a LASlib internal error
+        las = self._las_from_ept()
+        result = pylasr.execute(pylasr.write_lax(), [EPT, las])
+        self.assertTrue(result["success"])
+
+    def test_reader_coverage_merges_a_buffered_neighbour_of_either_kind(self):
+        # File-by-file chunking (reader_coverage, not a query) makes each file its own
+        # chunk's main source and puts any other file overlapping its buffered extent in
+        # neighbour_files -- EPT included, and regardless of whether the chunk's own main
+        # file is LAS or EPT. A buffer-requiring stage must still read those neighbours.
+        las = self._las_from_ept()
+        from_ept = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        from_las = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), las))
+
+        pipeline = pylasr.reader_coverage() + pylasr.classify_with_sor(k=8, m=6) + pylasr.summarise()
+        result = pylasr.execute(pipeline, [EPT, las])
+        # Two chunks (main=EPT, main=las), each must also read the other file as a
+        # buffer-only neighbour: the total is twice the sum of the two files read alone
+        self.assertEqual(_npoints(result), 2 * (from_ept + from_las))
 
 
 if __name__ == "__main__":
