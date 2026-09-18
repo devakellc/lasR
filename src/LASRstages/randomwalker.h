@@ -10,7 +10,9 @@ class LASRrandomwalker : public StageRaster
 public:
   LASRrandomwalker() = default;
   bool process(PointCloud*& las) override;
-  double need_buffer() const override { return 10; };
+  // A seed up to max_cr/2 beyond the chunk can still own a boundary pixel, and its own solve
+  // window then reaches another max_cr/2 further out
+  double need_buffer() const override { return 2*radius; };
   bool connect(const std::list<std::unique_ptr<Stage>>&, const std::string& uuid) override;
   bool set_parameters(const nlohmann::json&) override;
   std::string get_name() const override { return "random_walker"; }
