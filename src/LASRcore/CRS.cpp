@@ -108,7 +108,10 @@ bool CRS::is_geographic() const
 
 bool CRS::operator==(const CRS& other) const
 {
-  return epsg == other.epsg && valid == other.valid && wkt == other.wkt;
+  if (epsg == other.epsg && valid == other.valid && wkt == other.wkt) return true;
+
+  // The same CRS can be written in several WKT
+  return valid && other.valid && oSRS.IsSame(&other.oSRS);
 }
 
 // # nocov start
