@@ -400,4 +400,10 @@ bool LASRmultichm::write()
 void LASRmultichm::clear(bool last)
 {
   lm.clear();
+  std::vector<float>().swap(z);
+  std::vector<uint32_t>().swap(offset);
+  std::vector<uint32_t>().swap(k);
+  std::vector<float>().swap(chm);
+  std::vector<char>().swap(has_lm);
+  std::vector<int>().swap(active);
 }
