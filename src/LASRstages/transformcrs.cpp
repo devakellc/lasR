@@ -76,12 +76,14 @@ void LASRtransformcrs::set_crs(const CRS& crs)
   resolve_vertical();
 }
 
-// How a CRS describes Z: 0 not at all, -1 ellipsoidal, > 0 the EPSG code of a vertical CRS
+// How a CRS describes Z: 0 not at all, > 0 the EPSG code of a vertical CRS, < 0 ellipsoidal,
+// as minus the code of the CRS itself so that two ellipsoidal CRS do not compare equal
 static int vertical_id(const CRS& crs)
 {
   int epsg = crs.get_vertical_epsg();
   if (epsg != 0) return epsg;
-  return crs.has_vertical() ? -1 : 0;
+  if (!crs.has_vertical()) return 0;
+  return (crs.get_epsg() > 0) ? -crs.get_epsg() : -1;
 }
 
 // A target that describes Z drives Z through the transformation. One that does not leaves Z
