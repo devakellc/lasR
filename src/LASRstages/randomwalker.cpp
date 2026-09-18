@@ -117,6 +117,7 @@ bool LASRrandomwalker::process(PointCloud*& las)
   // pixel, so they are computed once here instead of once per overlapping seed window in walk()
   int ncols = raster.get_ncols();
   int nrows = raster.get_nrows();
+  const double weight_floor = 1e-6; // keeps a path across a steep edge instead of severing it
   std::vector<float> edge_w(4*(size_t)ncells, 0.0f);
 
   #pragma omp parallel for num_threads(ncpu)
@@ -137,7 +138,7 @@ bool LASRrandomwalker::process(PointCloud*& las)
       if (std::isnan(z[adj])) continue;
 
       double dz = z[c]-z[adj];
-      edge_w[4*c+i] = (float)(std::exp(-beta*dz*dz) + 1e-6);
+      edge_w[4*c+i] = (float)(std::exp(-beta*dz*dz) + weight_floor);
     }
   }
 
@@ -295,7 +296,10 @@ void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, c
   double omega = 2/(1 + std::sin(std::acos(-1.0)/MAX(nr, nc)));
   double delta = 1;
 
-  for (int iter = 0 ; iter < 200 && delta > 1e-5 ; iter++)
+  const int max_iter = 200; // a 21x21 window at the default max_cr converges in well under this
+  const double tol = 1e-5;  // stop once the largest update in a sweep falls below this
+
+  for (int iter = 0 ; iter < max_iter && delta > tol ; iter++)
   {
     delta = 0;
 
@@ -312,6 +316,8 @@ void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, c
 
   // A pixel that no walker reached is left to the background. Ties are broken with the rank of the
   // seed so that the result does not depend on the order of the threads
+  const float claim_eps = 1e-8f; // below this a walker's reach is noise, not a claim on the pixel
+
   #pragma omp critical(random_walker_merge)
   {
     prob[seed_cell] = 1.0f;
@@ -319,7 +325,7 @@ void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, c
 
     for (int f = 0 ; f < nfree ; f++)
     {
-      if (x[f] <= 1e-8f) continue;
+      if (x[f] <= claim_eps) continue;
 
       if (x[f] > prob[cell[f]] || (x[f] == prob[cell[f]] && s < owner[cell[f]]))
       {
