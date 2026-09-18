@@ -4,6 +4,7 @@
 #include "Stage.h"
 #include "Metrics.h"
 #include "NA.h"
+#include "Interval.h"
 
 class LASRrasterize : public StageRaster
 {
@@ -28,6 +29,14 @@ public:
     if (connections.size() > 0) return StageRaster::memory_per_area() + sizeof(double)*cells;
     if (!streamable) return StageRaster::memory_per_area() + 64.0*cells;
     return StageRaster::memory_per_area();
+  };
+
+  // The grouped branch above also keeps an Interval per point in the map it builds
+  double memory_per_point() const override
+  {
+    if (raster.get_xres() <= 0) return StageRaster::memory_per_point();
+    if (connections.size() == 0 && !streamable) return StageRaster::memory_per_point() + sizeof(Interval);
+    return StageRaster::memory_per_point();
   };
 
   // multi-threading
