@@ -19,6 +19,12 @@ bool LASRrandomwalker::set_parameters(const nlohmann::json& stage)
     return false;
   }
 
+  if (radius <= 0)
+  {
+    last_error = "max_cr must be positive";
+    return false;
+  }
+
   for (auto elem : connections)
   {
     StageRaster* rst = dynamic_cast<StageRaster*>(elem.second);
