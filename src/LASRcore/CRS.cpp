@@ -74,6 +74,16 @@ CRS::CRS(const std::string& str, bool err)
     epsg = std::stoi(authority_code);
   }
 
+  // SetFromUserInput() accepts shorthand (e.g. "EPSG:3857+5703") that OSRImportFromWkt does
+  // not read back; store the canonical WKT so write_las() and other readers recover the CRS.
+  char* pszNewWKT;
+  char** papszOptions = nullptr;
+  papszOptions = CSLSetNameValue(papszOptions, "FORMAT", "WKT2");
+  oSRS.exportToWkt(&pszNewWKT, papszOptions);
+  wkt = std::string(pszNewWKT);
+  CPLFree(pszNewWKT);
+  CSLDestroy(papszOptions);
+
   CPLPopErrorHandler();
 }
 
