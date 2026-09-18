@@ -42,13 +42,17 @@ bool LASRrandomwalker::process(PointCloud*& las)
 {
   auto start_time = std::chrono::high_resolution_clock::now();
 
+  Stage* seed_stage = nullptr;
   StageMaxima* lmf = nullptr;
   StageRaster* rst = nullptr;
   for (auto elem : connections)
   {
     StageMaxima* p = dynamic_cast<StageMaxima*>(elem.second);
     if (p)
+    {
       lmf = p;
+      seed_stage = elem.second;
+    }
     else
       rst = dynamic_cast<StageRaster*>(elem.second);
   }
@@ -57,6 +61,23 @@ bool LASRrandomwalker::process(PointCloud*& las)
   {
     last_error = "invalid pointers: must be 'StageMaxima' and 'StageRaster'. Please report this error."; // # nocov
     return false; // # nocov
+  }
+
+  // Same check as region_growing: seeds computed on the point cloud, or on a raster other
+  // than the one being segmented here, silently segment against the wrong surface
+  if (seed_stage->get_connection().size() == 0)
+  {
+    warning("computing random_walker on a raster but seeds were found using the point cloud\n");
+  }
+  else
+  {
+    const Raster& ref_rast = ((StageRaster*)seed_stage->get_connection().begin()->second)->get_raster();
+    const Raster& this_rast = rst->get_raster();
+
+    if (&ref_rast != &this_rast)
+    {
+      warning("computing random_walker on a raster but seeds were found using another raster\n");
+    }
   }
 
   const std::vector<PointLAS>& lm = lmf->get_maxima();
