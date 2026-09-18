@@ -49,6 +49,7 @@ bool LASReptreader::process(Header*& header)
   if (sources.empty()) { last_error = "EPT reader requires at least one source in the chunk"; return false; }
 
   header = new Header;
+  this->header = header;
 
   try
   {
@@ -95,8 +96,6 @@ bool LASReptreader::process(Header*& header)
     last_error = e.what();
     return false;
   }
-
-  this->header = header;
 
   return true;
 }
