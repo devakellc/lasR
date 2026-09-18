@@ -37,7 +37,8 @@ inline void gmtime_r(const time_t* timep, std::tm* result)
 bool is_ept_endpoint(const std::string& path)
 {
   std::string p = path.substr(0, path.find('?'));
-  return p.size() >= 8 && p.substr(p.size() - 8) == "ept.json";
+  size_t sep = p.find_last_of("/\\");
+  return (sep == std::string::npos ? p : p.substr(sep + 1)) == "ept.json";
 }
 
 static bool is_remote_path(const std::string& path)
