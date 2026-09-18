@@ -78,6 +78,7 @@ RCPP_MODULE(stages)
   function("reader_coverage", &api::reader_coverage, "Read points coverage");
   function("reader_circles", &api::reader_circles, "Read points within circles");
   function("reader_rectangles", &api::reader_rectangles, "Read points within rectangles");
+  function("reader_polygons", &api::reader_polygons, "Read points within polygons");
   function("region_growing", &api::region_growing, "Region growing segmentation tree segmentation");
   function("remove_attribute", &api::remove_attribute, "Remove a named attribute from the point cloud");
   function("remove_attributes", &api::remove_attributes, "Remove named attributes from the point cloud");

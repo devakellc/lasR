@@ -408,6 +408,25 @@ class TestReaders(unittest.TestCase):
         )
         self.assertIsInstance(pipeline, pylasr.Pipeline)
 
+    def test_reader_polygons(self):
+        """Test reader_polygons pipeline creation"""
+        pipeline = pylasr.reader_polygons(
+            aoi="POLYGON((0 0, 50 0, 50 50, 0 50, 0 0))",
+        )
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
+    def test_reader_polygons_multipolygon(self):
+        """Test reader_polygons with several parts"""
+        pipeline = pylasr.reader_polygons(
+            aoi="MULTIPOLYGON(((0 0, 50 0, 50 50, 0 50, 0 0)),((100 100, 150 100, 150 150, 100 150, 100 100)))",
+        )
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
+    def test_reader_polygons_invalid_geometry(self):
+        """Test reader_polygons rejects a non polygonal geometry"""
+        with self.assertRaises(Exception):
+            pylasr.reader_polygons(aoi="POINT(0 0)")
+
 
 class TestCRSOperations(unittest.TestCase):
     """Test CRS operation pipeline functions"""

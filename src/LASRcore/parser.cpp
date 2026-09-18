@@ -311,6 +311,27 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
             }
           }
 
+          // The area of interest does not chunk the collection, it clips every chunk. Narrowing the
+          // extent to it sizes the outputs on the region that is actually processed
+          if (stage.contains("aoi"))
+          {
+            std::string wkt = stage.at("aoi");
+
+            if (!wkt.empty())
+            {
+              if (!catalog->set_aoi(wkt)) return false;
+
+              const PolygonShape* shape = catalog->get_aoi();
+              if (shape->intersects(xmin, ymin, xmax, ymax))
+              {
+                xmin = MAX(xmin, shape->xmin());
+                ymin = MAX(ymin, shape->ymin());
+                xmax = MIN(xmax, shape->xmax());
+                ymax = MIN(ymax, shape->ymax());
+              }
+            }
+          }
+
           double temp_xmin = std::numeric_limits<double>::max();
           double temp_ymin = std::numeric_limits<double>::max();
           double temp_xmax = std::numeric_limits<double>::lowest();

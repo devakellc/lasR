@@ -36,6 +36,7 @@ Vector::Vector(const Vector& vector, const Chunk& chunk) : GDALdataset()
   extent[1] = chunk.ymin;
   extent[2] = chunk.xmax;
   extent[3] = chunk.ymax;
+  aoi = chunk.aoi;
 
   dupfid = 0;
   nattr = vector.nattr;
@@ -104,8 +105,11 @@ bool Vector::write(const std::vector<PointLAS>& batch, bool write_attributes)
   bool success = true;
   for (const auto& p : batch)
   {
-    // Write only points inside the bounding box
+    // Write only points inside the bounding box and inside the area of interest
     if (p.x < extent[0] || p.x > extent[2] || p.y < extent[1] || p.y > extent[3])
+      continue;
+
+    if (aoi != nullptr && !aoi->contains(p.x, p.y))
       continue;
 
     // Check if a feature with the same FID already exists. This should not happen
@@ -212,8 +216,13 @@ bool Vector::write(const PointXYZAttrs& p)
     return false; // # nocov
   }
 
-  // Write only points inside the bounding box
+  // Write only points inside the bounding box and inside the area of interest
   if (p.x < extent[0] || p.x > extent[2] || p.y < extent[1] || p.y > extent[3])
+  {
+    return true;
+  }
+
+  if (aoi != nullptr && !aoi->contains(p.x, p.y))
   {
     return true;
   }
@@ -367,4 +376,5 @@ void Vector::set_chunk(const Chunk& chunk)
   extent[1] = chunk.ymin;
   extent[2] = chunk.xmax;
   extent[3] = chunk.ymax;
+  aoi = chunk.aoi;
 }

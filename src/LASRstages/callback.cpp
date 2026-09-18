@@ -351,7 +351,7 @@ bool LASRcallback::process(PointCloud*& las)
       int i = 0;
       while (las->read_point())
       {
-        bool buffer = las->point.inside_buffer(xmin, ymin, xmax, ymax, circular);
+        bool buffer = las->point.inside_buffer(xmin, ymin, xmax, ymax, circular) || !aoi_contains(las->point.get_x(), las->point.get_y());
         if (drop_buffer && buffer) continue;
 
         // for each element of the list

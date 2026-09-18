@@ -4,6 +4,7 @@ Integration tests for pylasr using actual data processing workflows
 """
 
 import os
+import glob
 import shutil
 import sys
 import tempfile
@@ -255,3 +256,139 @@ class TestErrorHandling(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestAreaOfInterest(unittest.TestCase):
+    """Test the area of interest clipping the readers"""
+
+    # Bounding box of Topography.las
+    XMIN, YMIN, XMAX, YMAX = 273357, 5274357, 273643, 5274643
+    XMID, YMID = 273500, 5274500
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.las = None
+        for path in [
+            "../inst/extdata/Topography.las",
+            "../../inst/extdata/Topography.las",
+            "../../../inst/extdata/Topography.las",
+        ]:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                self.las = full_path
+                break
+
+        if not self.las:
+            self.skipTest("Topography LAS file not found")
+
+    def npoints(self, aoi=None):
+        reader = pylasr.reader_coverage() if aoi is None else pylasr.reader_polygons(aoi=aoi)
+        pipeline = reader + pylasr.summarise()
+        result = pipeline.execute([self.las])
+        self.assertTrue(result["success"], "Pipeline execution failed")
+        return result["data"][0]["summary"]["npoints"]
+
+    @staticmethod
+    def ring(xmin, ymin, xmax, ymax):
+        return [[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax], [xmin, ymin]]
+
+    @classmethod
+    def box(cls, xmin, ymin, xmax, ymax):
+        vertices = ", ".join(f"{x} {y}" for x, y in cls.ring(xmin, ymin, xmax, ymax))
+        return f"POLYGON(({vertices}))"
+
+    def test_aoi_covering_the_data_keeps_every_point(self):
+        """An area of interest larger than the data changes nothing"""
+        self.assertEqual(self.npoints(self.box(self.XMIN, self.YMIN, self.XMAX, self.YMAX)), self.npoints())
+
+    def test_aoi_halves_partition_the_point_cloud(self):
+        """Two halves of the coverage add up to the whole"""
+        left = self.npoints(self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX))
+        right = self.npoints(self.box(self.XMID, self.YMIN, self.XMAX, self.YMAX))
+        self.assertEqual(left + right, self.npoints())
+
+    def test_aoi_from_coordinate_rings_matches_wkt(self):
+        """Nested lists of coordinates describe the same area as the WKT"""
+        wkt = self.npoints(self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX))
+        rings = self.npoints([self.ring(self.XMIN, self.YMIN, self.XMID, self.YMAX)])
+        self.assertEqual(rings, wkt)
+
+    def test_aoi_from_multipolygon_rings(self):
+        """One more level of nesting describes a multipolygon"""
+        halves = [
+            [self.ring(self.XMIN, self.YMIN, self.XMID, self.YMAX)],
+            [self.ring(self.XMID, self.YMIN, self.XMAX, self.YMAX)],
+        ]
+        self.assertEqual(self.npoints(halves), self.npoints())
+
+    def test_aoi_hole_is_subtracted(self):
+        """A hole removes exactly the points the hole alone would keep"""
+        outer = self.ring(self.XMIN, self.YMIN, self.XMAX, self.YMAX)
+        inner = self.ring(273450, 5274450, 273550, 5274550)
+        holed = self.npoints([outer, inner])
+        hole = self.npoints([inner])
+        self.assertEqual(holed + hole, self.npoints())
+
+    def test_aoi_chunking_does_not_change_the_points(self):
+        """A chunk size tiles the area of interest instead of being refused"""
+        aoi = self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX)
+        pipeline = pylasr.reader_polygons(aoi=aoi) + pylasr.summarise()
+        pipeline.set_chunk(100)
+        result = pipeline.execute([self.las])
+        self.assertTrue(result["success"], "Pipeline execution failed")
+        self.assertEqual(result["data"][0]["summary"]["npoints"], self.npoints(aoi))
+
+    def test_aoi_chunking_tiles_the_rasters(self):
+        """The tiles of a chunked area of interest are written one by one"""
+        aoi = self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX)
+        temp_dir = tempfile.mkdtemp()
+        try:
+            pipeline = pylasr.reader_polygons(aoi=aoi) + pylasr.rasterize(
+                res=2, window=2, ofile=os.path.join(temp_dir, "*_chm.tif")
+            )
+            pipeline.set_chunk(100)
+            self.assertTrue(pipeline.execute([self.las])["success"], "Pipeline execution failed")
+            self.assertGreater(len(glob.glob(os.path.join(temp_dir, "*.tif"))), 1)
+        finally:
+            shutil.rmtree(temp_dir)
+
+    def test_aoi_outside_the_data_returns_nothing(self):
+        """An area of interest that reaches no file is not an error"""
+        self.assertEqual(self.npoints(self.box(280000, 5280000, 280100, 5280100)), 0)
+
+    def test_invalid_aoi_is_rejected(self):
+        """A malformed or non areal geometry is refused with a readable message"""
+        with self.assertRaises(Exception):
+            self.npoints("POLYGON((0 0, 1 1")
+        with self.assertRaises(Exception):
+            self.npoints("POINT(0 0)")
+
+    def test_island_in_a_hole_is_not_double_counted(self):
+        """The island's box sits entirely inside the donut's box: a point there must be read once"""
+        outer = self.ring(self.XMIN, self.YMIN, self.XMAX, self.YMAX)
+        hole = self.ring(273437, 5274437, 273563, 5274563)
+        island = self.ring(273477, 5274477, 273523, 5274523)
+
+        donut_alone = self.npoints([outer, hole])
+        island_alone = self.npoints([island])
+        combined = self.npoints([[outer, hole], [island]])
+
+        self.assertEqual(combined, donut_alone + island_alone)
+
+    def test_island_in_a_hole_is_not_double_counted_when_chunked(self):
+        """The same disjoint-box check, but tiled: overlapping boxes tile into overlapping chunks too"""
+        outer = self.ring(self.XMIN, self.YMIN, self.XMAX, self.YMAX)
+        hole = self.ring(273437, 5274437, 273563, 5274563)
+        island = self.ring(273477, 5274477, 273523, 5274523)
+
+        donut_alone = self.npoints([outer, hole])
+        island_alone = self.npoints([island])
+
+        pipeline = pylasr.reader_polygons(aoi=[[outer, hole], [island]]) + pylasr.summarise()
+        pipeline.set_chunk(50)
+        result = pipeline.execute([self.las])
+        self.assertTrue(result["success"], "Pipeline execution failed")
+
+        self.assertEqual(result["data"][0]["summary"]["npoints"], donut_alone + island_alone)

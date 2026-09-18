@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "api.h"
+#include "Shape.h"
 
 namespace api
 {
@@ -350,6 +351,32 @@ Pipeline reader_rectangles(std::vector<double> xmin, std::vector<double> ymin, s
   s.set("xmax", xmax);
   s.set("ymin", ymin);
   s.set("ymax", ymax);
+
+  return Pipeline(s);
+}
+
+Pipeline reader_polygons(std::string aoi, std::vector<std::string> filter, std::string select, int depth)
+{
+  if (aoi.empty())
+    throw std::invalid_argument("an area of interest is required");
+
+  // The area of interest does not drive the chunking. Query the bounding box of each of its parts
+  // so the chunks match the polygons, and let the area of interest clip them.
+  std::vector<double> xmin, ymin, xmax, ymax;
+  std::string error;
+  if (!wkt_part_bboxes(aoi, xmin, ymin, xmax, ymax, error))
+    throw std::invalid_argument(error);
+
+  if (depth >= 0)
+    filter.push_back("-depth " + std::to_string(depth));
+
+  Stage s("reader");
+  s.set("filter", filter);
+  s.set("xmin", xmin);
+  s.set("xmax", xmax);
+  s.set("ymin", ymin);
+  s.set("ymax", ymax);
+  s.set("aoi", aoi);
 
   return Pipeline(s);
 }

@@ -143,6 +143,16 @@ protected:
 
   double convert_units(double) const;
 
+  // Where a point falls relative to the area of interest. Without one every point is inside and
+  // nothing is ever discarded
+  enum AOIposition { AOI_INSIDE, AOI_BUFFER, AOI_OUTSIDE };
+  bool aoi_contains(double x, double y) const { return aoi == nullptr || aoi->contains(x, y); };
+  AOIposition aoi_position(double x, double y) const
+  {
+    if (aoi_contains(x, y)) return AOI_INSIDE;
+    return aoi->near_boundary(x, y, buffer) ? AOI_BUFFER : AOI_OUTSIDE;
+  };
+
 protected:
   int ncpu;
   int ncpu_concurrent_files;
@@ -152,6 +162,7 @@ protected:
   double ymax;
   double buffer;
   bool circular;
+  std::shared_ptr<const PolygonShape> aoi;
   bool verbose;
   CRS crs;
   std::string ifile;

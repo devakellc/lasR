@@ -528,6 +528,28 @@ void FileCollection::add_query(double xcenter, double ycenter, double radius)
   queries.push_back(circ);
 }
 
+bool FileCollection::set_aoi(const std::string& wkt)
+{
+  if (wkt.empty())
+  {
+    aoi = nullptr;
+    return true;
+  }
+
+  std::string error;
+  PolygonShape* shape = PolygonShape::from_wkt(wkt, error);
+
+  if (shape == nullptr)
+  {
+    last_error = "Invalid area of interest: " + error;
+    return false;
+  }
+
+  aoi.reset(shape);
+
+  return true;
+}
+
 bool FileCollection::add_las_file(std::string file, bool noprocess)
 {
   std::replace(file.begin(), file.end(), '\\', '/' );
@@ -681,7 +703,9 @@ bool FileCollection::set_chunk_size(double size)
 
   if (size > 0)
   {
-    if (queries.size() > 0)
+    // The queries of an area of interest are the bounding boxes of its polygons: they are ours to
+    // tile. Any other query is a region the user asked for and must be read as it is.
+    if (queries.size() > 0 && aoi == nullptr)
     {
       last_error = "Impossible to set chunk size with queries";
       return false;
@@ -689,16 +713,45 @@ bool FileCollection::set_chunk_size(double size)
 
     chunk_size = size;
 
-    Grid grid(xmin, ymin, xmax, ymax, chunk_size);
-    for (int i = 0 ; i < grid.get_ncells() ; i++)
-    {
-      double x = grid.x_from_cell(i);
-      double y = grid.y_from_cell(i);
-      double hsize = size/2;
+    // Each polygon is tiled in its own bounding box. Tiling the bounding box of the whole area of
+    // interest instead would walk a grid spanning the gaps between distant polygons.
+    std::vector<Rectangle> extents;
+    if (aoi == nullptr)
+      extents.emplace_back(xmin, ymin, xmax, ymax);
+    else
+      for (const auto q : queries) extents.emplace_back(q->xmin(), q->ymin(), q->xmax(), q->ymax());
 
-      if (file_index.has_overlap(x-hsize, y-hsize, x+hsize, y+hsize))
-        add_query(x-hsize, y-hsize, x+hsize, y+hsize);
+    std::vector<Shape*> tiles;
+
+    for (const auto& extent : extents)
+    {
+      double gxmin = MAX(xmin, extent.xmin());
+      double gymin = MAX(ymin, extent.ymin());
+      double gxmax = MIN(xmax, extent.xmax());
+      double gymax = MIN(ymax, extent.ymax());
+
+      if (gxmin > gxmax || gymin > gymax) continue;
+
+      Grid grid(gxmin, gymin, gxmax, gymax, chunk_size);
+      for (int i = 0 ; i < grid.get_ncells() ; i++)
+      {
+        double x = grid.x_from_cell(i);
+        double y = grid.y_from_cell(i);
+        double hsize = size/2;
+
+        if (!file_index.has_overlap(x-hsize, y-hsize, x+hsize, y+hsize)) continue;
+        if (aoi != nullptr && !aoi->intersects(x-hsize, y-hsize, x+hsize, y+hsize)) continue;
+
+        tiles.push_back(new Rectangle(x-hsize, y-hsize, x+hsize, y+hsize));
+      }
     }
+
+    // A grid reaching nothing leaves the queries untouched: an area of interest outside the
+    // collection keeps its own empty chunk instead of falling back to a chunk per file.
+    if (tiles.empty()) return true;
+
+    for (auto p : queries) delete p;
+    queries = tiles;
   }
 
   return true;
@@ -723,6 +776,14 @@ bool FileCollection::get_chunk(int i, Chunk& chunk) const
   {
     success = get_chunk_with_query(i, chunk);
     chunk.process = true;
+  }
+
+  // The area of interest does not drive the chunking. It clips every chunk and rules out those it
+  // does not reach. Those remain available to buffer their neighbours
+  if (aoi != nullptr)
+  {
+    chunk.aoi = aoi;
+    if (!aoi->intersects(chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax)) chunk.process = false;
   }
 
   chunk.id = i;
