@@ -6,6 +6,9 @@
 #include <cmath>
 #include <limits>
 
+static const int drow[4] = {-1, 1, 0, 0};
+static const int dcol[4] = {0, 0, -1, 1};
+
 bool LASRrandomwalker::set_parameters(const nlohmann::json& stage)
 {
   th_tree = stage.value("th_tree", 2.0);
@@ -110,6 +113,34 @@ bool LASRrandomwalker::process(PointCloud*& las)
     if (!image.is_na(v) && v >= th_tree) z[c] = (float)((v-zmin)/span);
   }
 
+  // Edge weights depend only on z and beta, not on which seed's window happens to cover the
+  // pixel, so they are computed once here instead of once per overlapping seed window in walk()
+  int ncols = raster.get_ncols();
+  int nrows = raster.get_nrows();
+  std::vector<float> edge_w(4*(size_t)ncells, 0.0f);
+
+  #pragma omp parallel for num_threads(ncpu)
+  for (int c = 0 ; c < ncells ; c++)
+  {
+    if (std::isnan(z[c])) continue;
+
+    int r = raster.row_from_cell(c);
+    int k = raster.col_from_cell(c);
+
+    for (int i = 0 ; i < 4 ; i++)
+    {
+      int rr = r + drow[i];
+      int kk = k + dcol[i];
+      if (rr < 0 || rr >= nrows || kk < 0 || kk >= ncols) continue;
+
+      int adj = raster.cell_from_row_col(rr, kk);
+      if (std::isnan(z[adj])) continue;
+
+      double dz = z[c]-z[adj];
+      edge_w[4*c+i] = (float)(std::exp(-beta*dz*dz) + 1e-6);
+    }
+  }
+
   // One label per distinct seed cell. The first seed wins a shared cell
   std::vector<int> seed_cell;
   std::vector<int> seed_top;
@@ -136,7 +167,7 @@ bool LASRrandomwalker::process(PointCloud*& las)
   {
     if (progress->interrupted()) continue;
 
-    walk(s, seed_cell[s], z, seed_of, prob, owner);
+    walk(s, seed_cell[s], z, seed_of, edge_w, prob, owner);
 
     if (main_thread)
     {
@@ -180,11 +211,8 @@ bool LASRrandomwalker::process(PointCloud*& las)
 // radius max_cr/2 around the seed. The other seeds and the border of the window are zeros. The
 // pixels won by 's' are recorded in 'owner'
 void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, const std::vector<int>& seed_of,
-                            std::vector<float>& prob, std::vector<int>& owner)
+                            const std::vector<float>& edge_w, std::vector<float>& prob, std::vector<int>& owner)
 {
-  static const int drow[4] = {-1, 1, 0, 0};
-  static const int dcol[4] = {0, 0, -1, 1};
-
   int ncols = raster.get_ncols();
   int nrows = raster.get_nrows();
   double xres = raster.get_xres();
@@ -248,8 +276,7 @@ void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, c
       int adj = raster.cell_from_row_col(rr, kk);
       if (std::isnan(z[adj])) continue;
 
-      double dz = z[cell[f]]-z[adj];
-      w[4*f+i] = (float)(std::exp(-beta*dz*dz) + 1e-6);
+      w[4*f+i] = edge_w[4*cell[f]+i];
       sum_w += w[4*f+i];
 
       if (rr < row1 || rr > row2 || kk < col1 || kk > col2) continue;

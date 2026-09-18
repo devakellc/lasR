@@ -23,7 +23,7 @@ public:
 
 private:
   void walk(int s, int seed_cell, const std::vector<float>& z, const std::vector<int>& seed_of,
-            std::vector<float>& prob, std::vector<int>& owner);
+            const std::vector<float>& edge_w, std::vector<float>& prob, std::vector<int>& owner);
 
   double th_tree;
   double th_cr;
