@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -30,8 +31,10 @@ public:
 
 private:
   Header* header;
-  // One reader per entry of chunk.main_files.
-  std::vector<std::pair<std::string, std::unique_ptr<EPTio>>> sources;
+  // One reader per entry of chunk.main_files. Points into ept_cache, which is the
+  // owner: an endpoint stays open across chunks instead of every chunk re-opening it.
+  std::vector<std::pair<std::string, EPTio*>> sources;
+  std::unordered_map<std::string, std::unique_ptr<EPTio>> ept_cache;
   size_t current_source;
   bool streaming;
 };

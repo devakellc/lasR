@@ -26,12 +26,21 @@ bool LASReptreader::set_chunk(Chunk& chunk)
 
   try
   {
-    for (const auto& file : chunk.main_files)
+    for (size_t i = 0 ; i < chunk.main_files.size() ; i++)
     {
-      auto eptio = std::unique_ptr<EPTio>(new EPTio());
+      const std::string& file = chunk.main_files[i];
+
+      // Keyed by position, not just the path: the same endpoint can be listed twice in
+      // one chunk (lasR reads a duplicated input twice), and each entry needs its own
+      // reader so one does not silently drain the other's traversal.
+      std::unique_ptr<EPTio>& eptio = ept_cache[std::to_string(i) + ":" + file];
+      if (!eptio) eptio = std::unique_ptr<EPTio>(new EPTio());
+
+      // An endpoint already in the cache is already opened: query() only re-traverses
+      // the hierarchy for the new extent, it does not re-parse ept.json or re-probe a tile
       eptio->query(file, chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax,
                    chunk.buffer, chunk.shape == ShapeType::CIRCLE, filters);
-      sources.emplace_back(file, std::move(eptio));
+      sources.emplace_back(file, eptio.get());
     }
   }
   catch (const std::exception& e)
