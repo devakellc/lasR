@@ -311,11 +311,10 @@ bool LASRtransformcrs::process(PointCloud*& las)
   const bool y_int = (attr_y.type == AttributeType::INT32);
   const bool z_int = (attr_z.type == AttributeType::INT32);
 
-  // Only the horizontal coordinates (X/Y) are reprojected; Z is preserved as-is. This
-  // matches gdaltransform/sf/terra, which do not alter heights when reprojecting unless
-  // an explicit vertical/compound CRS is involved. Vertical CRS transformations are out of
-  // scope. While reading, get_x()/get_y() decode with the source scale/offset because the
-  // schema is not modified until the very end.
+  // X/Y are always reprojected; Z is reprojected too when the target CRS describes the
+  // heights (transform_z, see resolve_vertical()), otherwise it is preserved as-is. While
+  // reading, get_x()/get_y() decode with the source scale/offset because the schema is not
+  // modified until the very end.
 
   // Pick X/Y scale factors suited to the target CRS. Reusing a projected scale (e.g. 0.01 m)
   // for a geographic target would give ~1 km resolution, while reusing a geographic scale
