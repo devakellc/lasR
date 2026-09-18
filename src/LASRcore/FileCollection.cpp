@@ -160,7 +160,9 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
     return false;
   }
 
-  // Check the signatures. A collection holds one format, or LAS mixed with EPT
+  // Check the signatures. A collection holds one format, or LAS mixed with EPT.
+  // LASF covers both .las and .laz: the file signature is the same for both, the
+  // compression lives in point_data_format, not in this field.
   std::set<std::string> signatures;
   for (const auto& h : headers) signatures.insert(h.signature);
 
