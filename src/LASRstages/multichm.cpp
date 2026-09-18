@@ -228,14 +228,16 @@ float LASRmultichm::update_chm(bool peel, size_t& alive)
 }
 
 // Local maximum filter on the CHM. A cell that already gave a maximum is skipped. Its CHM only
-// decreases so the next ones would be duplicates
+// decreases so the next ones would be duplicates.
+// Sequential on purpose: a same-height neighbour only suppresses once it is itself confirmed
+// (has_lm), matching lidRplugins::multichm(); a naive parallel pass lets a rejected neighbour
+// suppress too and collapses a whole flat plateau to one point.
 void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
 {
   int ncols = grid.get_ncols();
   int nrows = grid.get_nrows();
   size_t n = active.size();
 
-  #pragma omp parallel for num_threads(ncpu)
   for (size_t a = 0 ; a < n ; a++)
   {
     int c = active[a];
@@ -257,17 +259,14 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
       int j = rr*ncols + cc;
       float u = chm[j];
 
-      // On a plateau the smallest cell index wins. The result does not depend on the traversal order
-      if (u != NA_F32_RASTER && (u > v || (u == v && j < c))) is_max = false;
+      if (u == NA_F32_RASTER) continue;
+      if (u > v || (u == v && has_lm[j])) is_max = false;
     }
 
     if (is_max)
     {
-      #pragma omp critical(multichm_maxima)
-      {
-        has_lm[c] = 1;
-        maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v});
-      }
+      has_lm[c] = 1;
+      maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v});
     }
   }
 }
