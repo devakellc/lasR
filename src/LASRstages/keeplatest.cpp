@@ -33,6 +33,12 @@ bool LASRkeeplatest::process(PointCloud*& las)
     return false;
   }
 
+  // With week time (global encoding bit 0 unset), gpstime wraps every week and does not
+  // order two acquisitions: the one flown later in its week wins the overlap regardless
+  // of which is actually newer
+  if (attribute == "gpstime" && !las->header->adjusted_standard_gps_time)
+    warning("keep_latest: GPS week time does not order acquisitions from different weeks\n");
+
   AttributeAccessor accessor(attribute);
 
   Grid grid(las->header->min_x, las->header->min_y, las->header->max_x, las->header->max_y, res);
