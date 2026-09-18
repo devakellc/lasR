@@ -13,6 +13,9 @@ public:
   bool connect(const std::list<std::unique_ptr<Stage>>&, const std::string& uuid) override;
   std::string get_name() const override { return "pit_fill"; }
 
+  // The focal filter builds its answer in a raster of its own before swapping it in
+  double memory_per_area() const override { return 2*StageRaster::memory_per_area(); };
+
   // multi-threading
   LASRpitfill* clone() const override { return new LASRpitfill(*this); };
 

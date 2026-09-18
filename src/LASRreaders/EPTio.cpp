@@ -282,6 +282,7 @@ void EPTio::query(const std::vector<std::string>& main_files,
 
   // Clear previous state
   tile_queue.clear();
+  queried_nodes.clear();
   total_points = 0;
   points_read = 0;
 
@@ -369,6 +370,7 @@ void EPTio::load_hierarchy_page(const EPTkey& page_key, double qxmin, double qym
       // Node has points — add to queue
       tile_queue.push_back(key);
       total_points += point_count;
+      queried_nodes.push_back({nxmin, nymin, nxmax, nymax, (size_t)point_count});
     }
     else if (point_count == -1)
     {
@@ -543,6 +545,7 @@ void EPTio::close()
   }
 
   tile_queue.clear();
+  queried_nodes.clear();
   opened = false;
   total_points = 0;
   points_read = 0;

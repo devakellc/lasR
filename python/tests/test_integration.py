@@ -340,6 +340,14 @@ class TestAreaOfInterest(unittest.TestCase):
         self.assertTrue(result["success"], "Pipeline execution failed")
         self.assertEqual(result["data"][0]["summary"]["npoints"], self.npoints(aoi))
 
+    def test_auto_chunking_does_not_change_the_points(self):
+        """Chunks sized on the memory they can afford keep every point of the area"""
+        aoi = self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX)
+        pipeline = pylasr.reader_polygons(aoi=aoi) + pylasr.rasterize(res=0.05, window=0) + pylasr.summarise()
+        result = pipeline.execute([self.las])
+        self.assertTrue(result["success"], "Pipeline execution failed")
+        self.assertEqual(result["data"][0]["summary"]["npoints"], self.npoints(aoi))
+
     def test_aoi_chunking_tiles_the_rasters(self):
         """The tiles of a chunked area of interest are written one by one"""
         aoi = self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX)

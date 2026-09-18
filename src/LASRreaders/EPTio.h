@@ -52,6 +52,12 @@ public:
              double buffer, bool circle,
              std::vector<std::string> filters);
 
+  size_t get_queried_points() const { return total_points; };
+
+  // Footprint and point count of every node the last query selected
+  struct Node { double xmin, ymin, xmax, ymax; size_t npoints; };
+  const std::vector<Node>& get_queried_nodes() const { return queried_nodes; };
+
 private:
   void parse_ept_json();
   void traverse_hierarchy(double qxmin, double qymin, double qxmax, double qymax);
@@ -86,6 +92,7 @@ private:
 
   // Hierarchy traversal state
   std::deque<EPTkey> tile_queue;
+  std::vector<Node> queried_nodes;
   int64_t total_points;
 
   // Current tile reader

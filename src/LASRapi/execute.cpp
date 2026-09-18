@@ -28,6 +28,11 @@
 #include "FileCollection.h"
 
 #include "DrawflowParser.h"
+
+// The share of the memory the chunks may take. The rest covers what no stage can declare: the
+// allocator, the GDAL caches, the interpreter
+#define AUTO_CHUNK_SHARE 0.9
+
 #include "nlohmann/json.hpp"
 
 namespace api
@@ -152,6 +157,28 @@ ReturnType execute(const std::string& config_file)
     bool is_parallelizable = pipeline.is_parallelizable();  // concurrent-files
 
     FileCollection* lascatalog = pipeline.get_catalog(); // the pipeline owns the catalog
+
+    // The chunks held at once are the concurrent files. A concurrent-points run holds one
+    size_t point_size = lascatalog->get_point_size();
+    unsigned long long ram = api::getAvailableRAM()*1000000ull;
+    if (point_size > 0 && ram > 0)
+    {
+      // A streamable pipeline never holds the point cloud
+      double bytes_per_point = pipeline.memory_per_point();
+      if (!pipeline.is_streamable()) bytes_per_point += point_size;
+      double bytes_per_area = pipeline.memory_per_area();
+      double budget = AUTO_CHUNK_SHARE*(double)ram/MAX(1, ncpu_outer_loop);
+
+      log(flog, verbose, "  Memory per chunk: %.0lf MB\n", budget/1e6);
+      log(flog, verbose, "  Memory per point: %.0lf bytes\n", bytes_per_point);
+      log(flog, verbose, "  Memory per m2: %.1lf bytes\n", bytes_per_area);
+
+      if (!lascatalog->set_auto_chunk(budget, bytes_per_point, bytes_per_area)) throw std::runtime_error(last_error);
+    }
+    else
+    {
+      log(flog, verbose, "  Chunks not sized: %s unknown\n", ram == 0 ? "available RAM" : "point size");
+    }
 
     int n = lascatalog->get_number_chunks();
 
