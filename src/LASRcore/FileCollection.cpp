@@ -16,6 +16,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <set>
 #include <filesystem>
 
 // To parse JSON VPC
@@ -32,6 +33,13 @@ inline void gmtime_r(const time_t* timep, std::tm* result)
   gmtime_s(result, timep);
 }
 #endif
+
+bool is_ept_endpoint(const std::string& path)
+{
+  std::string p = path.substr(0, path.find('?'));
+  size_t sep = p.find_last_of("/\\");
+  return (sep == std::string::npos ? p : p.substr(sep + 1)) == "ept.json";
+}
 
 static bool is_remote_path(const std::string& path)
 {
@@ -152,10 +160,15 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
     return false;
   }
 
-  // Check if all headers have the same signature
-  const std::string& referenceSignature = headers[0].signature; // Take the CRS of the first header
-  bool allSameSignature = std::all_of(headers.begin(), headers.end(), [&referenceSignature](const Header& h) { return h.signature == referenceSignature; });
-  if (!allSameSignature)
+  // Check the signatures. A collection holds one format, or LAS mixed with EPT.
+  // LASF covers both .las and .laz: the file signature is the same for both, the
+  // compression lives in point_data_format, not in this field.
+  std::set<std::string> signatures;
+  for (const auto& h : headers) signatures.insert(h.signature);
+
+  bool valid = signatures.size() == 1 ||
+               (signatures.size() == 2 && signatures.count("LASF") && signatures.count("EPTF"));
+  if (!valid)
   {
     last_error = "Impossible to mix different file formats";
     return false;
@@ -733,6 +746,9 @@ PathType FileCollection::get_format() const
 {
   const std::string& signature = headers[0].signature;
 
+  for (const auto& h : headers)
+    if (h.signature != signature) return MIXEDFILE;
+
   if (signature == "LASF")
     return LASFILE;
   else if (signature == "PCDF")
@@ -961,9 +977,8 @@ PathType FileCollection::parse_path(const std::string& path)
   // Check for EPT endpoint (remote or local ept.json)
   if (is_remote_path(path))
   {
-    // Check if URL path ends with ept.json (strip query params first)
     std::string url_path = path.substr(0, path.find('?'));
-    if (url_path.size() >= 8 && url_path.substr(url_path.size() - 8) == "ept.json")
+    if (is_ept_endpoint(path))
       return PathType::REMOTEEPTFILE;
 
     // Validate remote file has a LAS/LAZ extension
@@ -986,7 +1001,7 @@ PathType FileCollection::parse_path(const std::string& path)
     if (std::filesystem::is_regular_file(file_path))
     {
       // Check for local EPT endpoint
-      if (file_path.filename() == "ept.json")
+      if (is_ept_endpoint(path))
         return PathType::EPTFILE;
 
       std::string ext = file_path.extension().string();

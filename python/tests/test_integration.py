@@ -314,5 +314,73 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         self.assertEqual(n_two, 2 * n_one)
 
 
+    def _las_from_ept(self):
+        # a LAS written from the EPT inherits its scale and offset, so the two agree
+        las = os.path.join(self.temp_dir, "from_ept.las")
+        pylasr.execute(pylasr.reader_coverage() + pylasr.write_las(las), EPT)
+        return las
+
+    def test_las_and_ept_in_one_collection(self):
+        las = self._las_from_ept()
+        # EPT and las cover the same extent, so file by file each is a neighbour of the
+        # other's chunk (as any two overlapping LAS files already are) and both get read
+        # twice: once as its own chunk's main file, once as the other chunk's neighbour
+        from_ept = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        from_las = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), las))
+        both = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), [EPT, las]))
+        self.assertEqual(both, 2 * (from_ept + from_las))
+
+    def test_las_and_ept_merge_in_one_chunk(self):
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        one = _npoints(pylasr.execute(query + pylasr.summarise(), EPT))
+        two = _npoints(pylasr.execute(query + pylasr.summarise(), [EPT, las]))
+        self.assertEqual(two, 2 * one)
+
+    def test_source_order_does_not_matter(self):
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        a = _npoints(pylasr.execute(query + pylasr.summarise(), [EPT, las]))
+        b = _npoints(pylasr.execute(query + pylasr.summarise(), [las, EPT]))
+        self.assertEqual(a, b)
+
+    def test_a_buffered_stage_does_not_index_the_ept(self):
+        # a stage asking for a buffer pulls in the lax writer, which must skip the endpoint
+        las = self._las_from_ept()
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        pipeline = query + pylasr.sampling_pixel(res=2.0) + pylasr.summarise()
+        self.assertGreater(_npoints(pylasr.execute(pipeline, [EPT, las])), 0)
+
+    def test_mismatched_scale_is_refused(self):
+        topography = os.path.normpath(os.path.join(os.path.dirname(EPT), "..", "Topography.las"))
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        with self.assertRaises(Exception) as ctx:
+            pylasr.execute(query + pylasr.summarise(), [EPT, topography])
+        self.assertIn("scale or offset", str(ctx.exception))
+
+    def test_write_lax_skips_ept_endpoints_called_directly(self):
+        # write_lax(), called directly rather than auto-inserted for a buffered stage,
+        # always runs the eager process(FileCollection*&) path (onthefly=false) and used
+        # to LAS-open every entry including an ept.json, failing with a LASlib internal error
+        las = self._las_from_ept()
+        result = pylasr.execute(pylasr.write_lax(), [EPT, las])
+        self.assertTrue(result["success"])
+
+    def test_reader_coverage_merges_a_buffered_neighbour_of_either_kind(self):
+        # File-by-file chunking (reader_coverage, not a query) makes each file its own
+        # chunk's main source and puts any other file overlapping its buffered extent in
+        # neighbour_files -- EPT included, and regardless of whether the chunk's own main
+        # file is LAS or EPT. A buffer-requiring stage must still read those neighbours.
+        las = self._las_from_ept()
+        from_ept = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        from_las = _npoints(pylasr.execute(pylasr.reader_coverage() + pylasr.summarise(), las))
+
+        pipeline = pylasr.reader_coverage() + pylasr.classify_with_sor(k=8, m=6) + pylasr.summarise()
+        result = pylasr.execute(pipeline, [EPT, las])
+        # Two chunks (main=EPT, main=las), each must also read the other file as a
+        # buffer-only neighbour: the total is twice the sum of the two files read alone
+        self.assertEqual(_npoints(result), 2 * (from_ept + from_las))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

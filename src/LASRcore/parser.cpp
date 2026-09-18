@@ -28,6 +28,7 @@
 #include "readlas.h"
 #include "readpcd.h"
 #include "readept.h"
+#include "readmixed.h"
 #include "regiongrowing.h"
 #include "setcrs.h"
 #include "sor.h"
@@ -278,6 +279,12 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
             case EPTFILE:
             {
               auto v = std::make_unique<LASReptreader>();
+              pipeline.push_back(std::move(v));
+              break;
+            }
+            case MIXEDFILE:
+            {
+              auto v = std::make_unique<LASRmixedreader>();
               pipeline.push_back(std::move(v));
               break;
             }
@@ -549,7 +556,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
 
       // Write lax is the very first stage. Even before read_las. It is called
       // only if needed.
-      if (!catalog->check_spatial_index() && !indexer && catalog->get_format() == LASFILE)
+      if (!catalog->check_spatial_index() && !indexer && (catalog->get_format() == LASFILE || catalog->get_format() == MIXEDFILE))
       {
         bool onthefly = catalog->get_number_files() > 1;
         auto v = std::make_unique<LASRlaxwriter>(false, false, onthefly);
