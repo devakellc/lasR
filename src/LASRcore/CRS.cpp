@@ -54,8 +54,11 @@ CRS::CRS(const std::string& str, bool err)
 
   CPLPushErrorHandler(CPLQuietErrorHandler);
 
-  // May not be WKT but still something GDAL understands, such as "EPSG:3857+5703"
-  if (oSRS.importFromWkt(wkt.c_str()) != OGRERR_NONE && oSRS.SetFromUserInput(wkt.c_str()) != OGRERR_NONE)
+  // May not be WKT but still something GDAL understands, such as "EPSG:3857+5703". The
+  // limitations keep SetFromUserInput() from treating an unreadable string as a filename to
+  // open or a URL to fetch: this constructor also runs on WKT read from LAS/EPT files.
+  if (oSRS.importFromWkt(wkt.c_str()) != OGRERR_NONE &&
+      oSRS.SetFromUserInput(wkt.c_str(), OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get()) != OGRERR_NONE)
   {
     char buffer[2048];
     snprintf(buffer, sizeof(buffer), "WKT string: %s", CPLGetLastErrorMsg());
