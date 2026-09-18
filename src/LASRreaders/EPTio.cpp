@@ -252,14 +252,13 @@ void EPTio::populate_header(Header* header, bool)
   header->number_of_point_records = total_points;
 }
 
-void EPTio::query(const std::vector<std::string>& main_files,
-                  const std::vector<std::string>&,
+void EPTio::query(const std::string& endpoint,
                   double xmin, double ymin, double xmax, double ymax,
                   double buffer, bool,
                   std::vector<std::string> filters)
 {
-  if (main_files.empty())
-    throw std::invalid_argument("EPT reader requires at least one file path");
+  if (endpoint.empty())
+    throw std::invalid_argument("EPT reader requires an endpoint path");
 
   // Reset depth limit so a previous query's setting doesn't carry over.
   depth_limit = -1;
@@ -278,7 +277,7 @@ void EPTio::query(const std::vector<std::string>& main_files,
 
   // Open the EPT endpoint
   if (!opened)
-    open(main_files[0]);
+    open(endpoint);
 
   // Clear previous state
   tile_queue.clear();

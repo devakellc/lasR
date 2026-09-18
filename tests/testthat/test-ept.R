@@ -63,8 +63,32 @@ test_that("EPT depth filtering works",
   expect_gt(full$npoints, 0)
 })
 
-test_that("Multiple EPT endpoints produce an error",
+test_that("Several EPT endpoints are read together",
 {
   ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
-  expect_error(exec(reader() + summarise(), on = c(ept, ept)), "single EPT")
+
+  one <- exec(reader() + summarise(), on = ept)
+  two <- exec(reader() + summarise(), on = c(ept, ept))
+
+  # the same endpoint twice covers the same ground twice, as a duplicated file does
+  expect_equal(two$npoints, 2 * one$npoints)
+})
+
+test_that("Several EPT endpoints are read together under a query",
+{
+  ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
+
+  query <- reader_rectangles(273360, 5274360, 273490, 5274490)
+  one <- exec(query + summarise(), on = ept)
+  two <- exec(query + summarise(), on = c(ept, ept))
+
+  expect_equal(two$npoints, 2 * one$npoints)
+})
+
+test_that("An EPT endpoint cannot be mixed with a LAS file",
+{
+  ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
+  las <- system.file("extdata", "Topography.las", package = "lasR")
+
+  expect_error(exec(reader() + summarise(), on = c(ept, las)), "mix different file formats")
 })

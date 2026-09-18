@@ -2,38 +2,55 @@
 
 #include "EPTio.h"
 
+// Same name is not enough: a source's "foo" can be a uint8 while another's is a
+// uint16, and matching by name alone would keep the first source's Attribute and let
+// AttributeAccessor decode every other source's raw bytes against the wrong type,
+// silently clamping the wider values.
+static bool same_representation(const Attribute& a, const Attribute& b)
+{
+  return a.type == b.type && a.scale_factor == b.scale_factor && a.value_offset == b.value_offset;
+}
+
 LASReptreader::LASReptreader()
 {
   header = nullptr;
-  eptio = nullptr;
+  current_source = 0;
   streaming = true;
+}
+
+LASReptreader::LASReptreader(const LASReptreader& other) : Stage(other)
+{
+  // The sources are rebuilt by set_chunk on the clone
+  header = nullptr;
+  current_source = 0;
+  streaming = other.streaming;
 }
 
 bool LASReptreader::set_chunk(Chunk& chunk)
 {
   Stage::set_chunk(chunk);
 
-  if (eptio)
-  {
-    eptio->close();
-    delete eptio;
-    eptio = nullptr;
-  }
-
-  eptio = new EPTio();
+  sources.clear();
+  current_source = 0;
 
   try
   {
-    eptio->query(
-        chunk.main_files,
-        chunk.neighbour_files,
-        chunk.xmin,
-        chunk.ymin,
-        chunk.xmax,
-        chunk.ymax,
-        chunk.buffer,
-        chunk.shape == ShapeType::CIRCLE,
-        filters);
+    for (size_t i = 0 ; i < chunk.main_files.size() ; i++)
+    {
+      const std::string& file = chunk.main_files[i];
+
+      // Keyed by position, not just the path: the same endpoint can be listed twice in
+      // one chunk (lasR reads a duplicated input twice), and each entry needs its own
+      // reader so one does not silently drain the other's traversal.
+      std::unique_ptr<EPTio>& eptio = ept_cache[std::to_string(i) + ":" + file];
+      if (!eptio) eptio = std::unique_ptr<EPTio>(new EPTio());
+
+      // An endpoint already in the cache is already opened: query() only re-traverses
+      // the hierarchy for the new extent, it does not re-parse ept.json or re-probe a tile
+      eptio->query(file, chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax,
+                   chunk.buffer, chunk.shape == ShapeType::CIRCLE, filters);
+      sources.emplace_back(file, eptio.get());
+    }
   }
   catch (const std::exception& e)
   {
@@ -47,20 +64,59 @@ bool LASReptreader::set_chunk(Chunk& chunk)
 bool LASReptreader::process(Header*& header)
 {
   if (header != nullptr) return true;
+  if (sources.empty()) { last_error = "EPT reader requires at least one source in the chunk"; return false; }
 
   header = new Header;
+  this->header = header;
 
   try
   {
-    eptio->populate_header(header);
+    sources[0].second->populate_header(header);
+
+    int64_t npoints = header->number_of_point_records;
+    std::vector<Header> others(sources.size() - 1);
+    for (size_t i = 1 ; i < sources.size() ; i++)
+    {
+      Header& other = others[i-1];
+      sources[i].second->populate_header(&other);
+
+      if (other.x_scale_factor != header->x_scale_factor ||
+          other.y_scale_factor != header->y_scale_factor ||
+          other.z_scale_factor != header->z_scale_factor ||
+          other.x_offset != header->x_offset ||
+          other.y_offset != header->y_offset ||
+          other.z_offset != header->z_offset)
+      {
+        last_error = "EPT endpoints with different scale or offset cannot be merged";
+        return false;
+      }
+
+      npoints += other.number_of_point_records;
+    }
+    header->number_of_point_records = npoints;
+
+    if (!others.empty())
+    {
+      AttributeSchema merged;
+      for (const auto& attribute : header->schema.attributes)
+      {
+        bool in_all = true;
+        for (const auto& other : others)
+        {
+          const Attribute* match = other.schema.find_attribute(attribute.name);
+          if (!match || !same_representation(*match, attribute)) { in_all = false; break; }
+        }
+
+        if (in_all) merged.add_attribute(attribute);
+      }
+      header->schema = merged;
+    }
   }
   catch (const std::exception& e)
   {
     last_error = e.what();
     return false;
   }
-
-  this->header = header;
 
   return true;
 }
@@ -73,7 +129,14 @@ bool LASReptreader::process(Point*& point)
 
   do
   {
-    if (eptio->read_point(point))
+    bool got = false;
+    while (current_source < sources.size())
+    {
+      if (sources[current_source].second->read_point(point)) { got = true; break; }
+      current_source++;
+    }
+
+    if (got)
     {
       if (point->inside_buffer(xmin, ymin, xmax, ymax, circular))
         point->set_buffered();
@@ -102,15 +165,21 @@ bool LASReptreader::process(PointCloud*& las)
 
   Point p(&header->schema);
 
-  while (eptio->read_point(&p))
+  int64_t read = 0;
+  for (auto& source : sources)
   {
-    if (progress->interrupted()) break;
-    if (pointfilter.filter(&p)) continue;
-    if (p.inside_buffer(xmin, ymin, xmax, ymax, circular)) p.set_buffered();
-    if (!las->add_point(p)) return false;
+    while (source.second->read_point(&p))
+    {
+      if (progress->interrupted()) break;
+      if (pointfilter.filter(&p)) continue;
+      if (p.inside_buffer(xmin, ymin, xmax, ymax, circular)) p.set_buffered();
+      if (!las->add_point(p)) return false;
 
-    progress->update(eptio->p_count());
-    progress->show();
+      progress->update(read + source.second->p_count());
+      progress->show();
+    }
+    read += source.second->p_count();
+    if (progress->interrupted()) break;
   }
 
   progress->done();
@@ -124,12 +193,6 @@ bool LASReptreader::process(PointCloud*& las)
 
 LASReptreader::~LASReptreader()
 {
-  if (eptio)
-  {
-    eptio->close();
-    delete eptio;
-    eptio = nullptr;
-  }
 }
 
 void LASReptreader::clear(bool)

@@ -1,5 +1,6 @@
 # lasR 0.21.2
 
+- New: `reader()` accepts several EPT endpoints
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

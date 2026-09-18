@@ -3,12 +3,19 @@
 
 #include "Stage.h"
 
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 class EPTio;
 
 class LASReptreader: public Stage
 {
 public:
   LASReptreader();
+  LASReptreader(const LASReptreader& other);
   ~LASReptreader();
   bool process(Header*& header) override;
   bool process(Point*& point) override;
@@ -24,7 +31,11 @@ public:
 
 private:
   Header* header;
-  EPTio* eptio;
+  // One reader per entry of chunk.main_files. Points into ept_cache, which is the
+  // owner: an endpoint stays open across chunks instead of every chunk re-opening it.
+  std::vector<std::pair<std::string, EPTio*>> sources;
+  std::unordered_map<std::string, std::unique_ptr<EPTio>> ept_cache;
+  size_t current_source;
   bool streaming;
 };
 
