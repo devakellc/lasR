@@ -2,6 +2,15 @@
 
 #include "EPTio.h"
 
+// Same name is not enough: a source's "foo" can be a uint8 while another's is a
+// uint16, and matching by name alone would keep the first source's Attribute and let
+// AttributeAccessor decode every other source's raw bytes against the wrong type,
+// silently clamping the wider values.
+static bool same_representation(const Attribute& a, const Attribute& b)
+{
+  return a.type == b.type && a.scale_factor == b.scale_factor && a.value_offset == b.value_offset;
+}
+
 LASReptreader::LASReptreader()
 {
   header = nullptr;
@@ -93,7 +102,10 @@ bool LASReptreader::process(Header*& header)
       {
         bool in_all = true;
         for (const auto& other : others)
-          if (!other.schema.has_attribute(attribute.name)) { in_all = false; break; }
+        {
+          const Attribute* match = other.schema.find_attribute(attribute.name);
+          if (!match || !same_representation(*match, attribute)) { in_all = false; break; }
+        }
 
         if (in_all) merged.add_attribute(attribute);
       }
