@@ -23,6 +23,8 @@ private:
 
 public:
   void add(double xmin, double ymin, double xmax, double ymax);
+  void set(int i, double xmin, double ymin, double xmax, double ymax);
+  const Rectangle& get(int i) const { return bboxes[i]; };
   bool has_overlap(double xmin, double ymin, double xmax, double ymax) const;
   std::vector<int> get_overlaps(double xmin, double ymin, double xmax, double ymax) const;
 };
@@ -71,6 +73,7 @@ private:
   bool add_ept_endpoint(std::string path, bool noprocess = false);
   bool add_header(const Header& header, bool noprocess = false);
   bool get_chunk_regular(int index, Chunk& chunk) const;
+  bool harmonize_extents();
   bool get_chunk_with_query(int index, Chunk& chunk) const;
   PathType parse_path(const std::string& path);
 

@@ -1,6 +1,7 @@
 #ifndef CHUNK_H
 #define CHUNK_H
 
+#include "CRS.h"
 #include "Shape.h"
 #include <string>
 
@@ -24,6 +25,7 @@ struct Chunk
     ymax = 0;
     id = 0;
     shape = ShapeType::UNKNOWN;
+    crs = CRS();
     buffer = 0;
     process = true;
     name.clear();
@@ -52,6 +54,7 @@ struct Chunk
   bool process;
   int id;
   ShapeType shape;
+  CRS crs;
   std::string name;
   std::vector<std::string> main_files;
   std::vector<std::string> neighbour_files;

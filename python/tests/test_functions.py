@@ -427,6 +427,17 @@ class TestCRSOperations(unittest.TestCase):
         pipeline = pylasr.set_crs(wkt)
         self.assertIsInstance(pipeline, pylasr.Pipeline)
 
+    def test_transform_crs_epsg(self):
+        """Test transform_crs with EPSG code"""
+        pipeline = pylasr.transform_crs(4326)
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
+    def test_transform_crs_wkt(self):
+        """Test transform_crs with WKT string"""
+        wkt = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]]]'
+        pipeline = pylasr.transform_crs(wkt)
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
 
 class TestWriters(unittest.TestCase):
     """Test writer pipeline functions"""

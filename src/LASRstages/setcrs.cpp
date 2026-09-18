@@ -29,3 +29,11 @@ bool LASRsetcrs::process(Header*& header)
   header->crs = crs;
   return true;
 }
+
+bool LASRsetcrs::set_chunk(Chunk& chunk)
+{
+  Stage::set_chunk(chunk);
+  // Declares the CRS a later stage, including transform_crs, must trust over the file's own
+  if (crs.is_valid()) chunk.crs = crs;
+  return true;
+}

@@ -164,8 +164,58 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
   // Check if all headers have the same CRS
   const CRS& referenceCRS = headers[0].crs; // Take the CRS of the first header
   bool allSameCRS = std::all_of(headers.begin(), headers.end(), [&referenceCRS](const Header& h) { return h.crs == referenceCRS; });
-  if (!allSameCRS) warning("mix CRS found. First one retained\n");
   crs = referenceCRS;
+  if (!allSameCRS)
+  {
+    warning("mix CRS found. The extents are expressed in the CRS of the first file\n");
+    if (!harmonize_extents()) return false;
+  }
+
+  return true;
+}
+
+// Express the collection bbox and the spatial index in the CRS of the collection. The
+// headers keep their native extent: that is what the reader queries the files with.
+bool FileCollection::harmonize_extents()
+{
+  if (!crs.is_valid())
+  {
+    last_error = "mixed CRS but the first file has no CRS to express the extents in";
+    return false;
+  }
+
+  xmin = std::numeric_limits<double>::max();
+  ymin = std::numeric_limits<double>::max();
+  xmax = std::numeric_limits<double>::lowest();
+  ymax = std::numeric_limits<double>::lowest();
+
+  for (size_t i = 0 ; i < headers.size() ; i++)
+  {
+    const Header& h = headers[i];
+    double x0 = h.min_x, y0 = h.min_y, x1 = h.max_x, y1 = h.max_y;
+
+    if (!(h.crs == crs))
+    {
+      if (!h.crs.is_valid())
+      {
+        last_error = "mixed CRS but '" + files[i].string() + "' has no CRS";
+        return false;
+      }
+
+      if (!reproject_bbox(h.crs, crs, x0, y0, x1, y1))
+      {
+        last_error = "cannot express the extent of '" + files[i].string() + "' in the CRS of the collection";
+        return false;
+      }
+    }
+
+    file_index.set(i, x0, y0, x1, y1);
+
+    if (xmin > x0) xmin = x0;
+    if (ymin > y0) ymin = y0;
+    if (xmax < x1) xmax = x1;
+    if (ymax < y1) ymax = y1;
+  }
 
   return true;
 }
@@ -787,14 +837,18 @@ bool FileCollection::get_chunk_regular(int i, Chunk& chunk) const
   }
 
   chunk.buffer = buffer;
+  chunk.crs = h.crs;
 
   // Perform a query to find the files that encompass the buffered region
-  std::vector<int> indexes = file_index.get_overlaps(h.min_x - buffer, h.min_y - buffer, h.max_x + buffer, h.max_y + buffer);
+  const Rectangle& b = file_index.get(i);
+  std::vector<int> indexes = file_index.get_overlaps(b.xmin() - buffer, b.ymin() - buffer, b.xmax() + buffer, b.ymax() + buffer);
   for (auto index : indexes)
   {
     std::string file = files[index].string();
     if (chunk.main_files[0] != file)
     {
+      // A neighbour in another CRS cannot be merged with the main file in a single read
+      if (!(headers[index].crs == h.crs)) continue;
       chunk.neighbour_files.push_back(file);
     }
   }
@@ -856,6 +910,7 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
   {
     chunk.main_files.push_back(files[0].string());
     chunk.name = files[0].stem().string() + "_" + std::to_string(i);
+    chunk.crs = headers[0].crs;
     return true;
   }
 
@@ -865,14 +920,33 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
     int index = indexes[0];
     chunk.main_files.push_back(files[index].string());
     chunk.name = files[index].stem().string() + "_" + std::to_string(i);
-    return true;
+    chunk.crs = headers[index].crs;
+  }
+  else
+  {
+    // There are multiple files. All the files are part of the main
+    chunk.crs = headers[indexes[0]].crs;
+    for (auto index : indexes)
+    {
+      // The files of a query are merged in a single read. Points of two CRS cannot be mixed
+      if (!(headers[index].crs == chunk.crs))
+      {
+        last_error = "the query at [" + std::to_string(minx) + ", " + std::to_string(miny) + ", " + std::to_string(maxx) + ", " + std::to_string(maxy) + "] spans files with different CRS";
+        return false;
+      }
+
+      chunk.main_files.push_back(files[index].string());
+      if (chunk.name.empty()) chunk.name = files[index].stem().string() + "_" + std::to_string(i);
+    }
   }
 
-  // There are multiple files. All the files are part of the main
-  for (auto index : indexes)
+  // The query is expressed in the CRS of the collection, harmonized from the first file. A
+  // matched file in another CRS would need that query reprojected before reading, which is
+  // not supported yet: refuse rather than read the wrong location.
+  if (crs.is_valid() && chunk.crs.is_valid() && !(chunk.crs == crs))
   {
-    chunk.main_files.push_back(files[index].string());
-    if (chunk.name.empty()) chunk.name = files[index].stem().string() + "_" + std::to_string(i);
+    last_error = "the query at [" + std::to_string(minx) + ", " + std::to_string(miny) + ", " + std::to_string(maxx) + ", " + std::to_string(maxy) + "] targets a file whose CRS differs from the collection's";
+    return false;
   }
 
   // We search the file that contains the centroid of the query to assign a name to the query
@@ -891,6 +965,9 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
     for (auto index : indexes)
     {
       std::string file = files[index].string();
+
+      // A neighbour in another CRS cannot be merged with the main file in a single read
+      if (!(headers[index].crs == chunk.crs)) continue;
 
       // if the file is not part of the main files
       auto it = std::find(chunk.main_files.begin(), chunk.main_files.end(), file);
@@ -1032,6 +1109,11 @@ FileCollection::~FileCollection()
 void FileCollectionIndex::add(double xmin, double ymin, double xmax, double ymax)
 {
   bboxes.emplace_back(xmin, ymin, xmax, ymax);
+}
+
+void FileCollectionIndex::set(int i, double xmin, double ymin, double xmax, double ymax)
+{
+  bboxes[i] = Rectangle(xmin, ymin, xmax, ymax);
 }
 
 bool FileCollectionIndex::has_overlap(double xmin, double ymin, double xmax, double ymax) const
