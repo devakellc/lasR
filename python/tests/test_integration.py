@@ -232,6 +232,66 @@ class TestIntegrationWorkflows(unittest.TestCase):
             self.fail(f"Pipeline execution raised an exception: {e}")
 
 
+class TestTransformCrsVertical(unittest.TestCase):
+    """Regression tests for transform_crs Z handling"""
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.megaplot = None
+        megaplot_paths = [
+            "../inst/extdata/Megaplot.las",
+            "../../inst/extdata/Megaplot.las",
+            "../../../inst/extdata/Megaplot.las",
+        ]
+        for path in megaplot_paths:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                self.megaplot = full_path
+                break
+        if self.megaplot is None:
+            self.skipTest("Megaplot.las not found")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_wkt_shorthand_target_is_stored_as_canonical_wkt(self):
+        # set_crs()/transform_crs() accept GDAL shorthand such as "EPSG:26917+5703" via
+        # SetFromUserInput(). Storing that literal string as the CRS's own WKT (instead of
+        # exporting the parsed spatial reference back to WKT) corrupts write_las(): the literal
+        # shorthand ends up in the WKT VLR, which strict WKT readers reject.
+        baked = os.path.join(self.temp_dir, "baked.las")
+        p0 = pylasr.Pipeline() + pylasr.set_crs("EPSG:26917+5703") + pylasr.write_las(baked)
+        pylasr.execute(p0, self.megaplot)
+
+        pipeline = pylasr.Pipeline() + pylasr.transform_crs("EPSG:32617+5703") + pylasr.summarise()
+        result = pylasr.execute(pipeline, baked)
+        wkt = result["data"][0]["summary"]["crs"]["wkt"]
+
+        self.assertNotEqual(wkt.strip(), "EPSG:32617+5703")
+        self.assertIn("COMPOUNDCRS", wkt)
+
+    def test_two_ellipsoidal_crs_reproject_without_being_treated_as_equal(self):
+        # vertical_id() used to give every uncoded ellipsoidal (3-axis) CRS the same id, -1, so
+        # two different ones (e.g. WGS84 and NAD83(2011)) compared equal and the stage kept the
+        # source Z untouched while still relabelling the output with the target's vertical CRS.
+        baked = os.path.join(self.temp_dir, "baked_4979.las")
+        p0 = pylasr.Pipeline() + pylasr.set_crs(4979) + pylasr.write_las(baked)
+        pylasr.execute(p0, self.megaplot)
+
+        out = os.path.join(self.temp_dir, "out_6319.las")
+        pipeline = pylasr.Pipeline() + pylasr.transform_crs(6319) + pylasr.write_las(out)
+        pylasr.execute(pipeline, baked)
+
+        summary_pipeline = pylasr.Pipeline() + pylasr.summarise()
+        result = pylasr.execute(summary_pipeline, out)
+        self.assertEqual(result["data"][0]["summary"]["crs"]["epsg"], 6319)
+
+
 class TestErrorHandling(unittest.TestCase):
     """Test error handling and edge cases"""
 
