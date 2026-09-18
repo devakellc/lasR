@@ -117,10 +117,13 @@ bool LASRrandomwalker::process(PointCloud*& las)
 
     walk(s, seed_cell[s], z, seed_of, prob, owner);
 
-    #pragma omp critical (random_walker_progress)
+    if (main_thread)
     {
-      (*progress)++;
-      if (main_thread) progress->show();
+      #pragma omp critical (random_walker_progress)
+      {
+        (*progress)++;
+        progress->show();
+      }
     }
   }
 
