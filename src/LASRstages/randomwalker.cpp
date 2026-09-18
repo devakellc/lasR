@@ -187,7 +187,9 @@ void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, c
 
   int ncols = raster.get_ncols();
   int nrows = raster.get_nrows();
-  int rad = (int)std::ceil(radius/raster.get_xres());
+  double xres = raster.get_xres();
+  double yres = raster.get_yres();
+  int rad = (int)std::ceil(radius/xres);
 
   int row = raster.row_from_cell(seed_cell);
   int col = raster.col_from_cell(seed_cell);
@@ -199,14 +201,22 @@ void LASRrandomwalker::walk(int s, int seed_cell, const std::vector<float>& z, c
   int nc = col2-col1+1;
   int n = nr*nc;
 
-  // Only the pixels that are neither a seed nor a hole of the canopy are unknowns. They are packed
+  // Only the pixels that are neither a seed nor a hole of the canopy, and lie within max_cr/2 of
+  // the seed (the window is square, the crown radius is circular), are unknowns. They are packed
   // so that the relaxation runs on a contiguous range
   std::vector<int> index(n, -1);
   int nfree = 0;
   for (int l = 0 ; l < n ; l++)
   {
-    int c = raster.cell_from_row_col(row1 + l/nc, col1 + l%nc);
+    int r = row1 + l/nc;
+    int k = col1 + l%nc;
+    int c = raster.cell_from_row_col(r, k);
     if (std::isnan(z[c]) || seed_of[c] >= 0) continue;
+
+    double dr = (r-row)*yres;
+    double dk = (k-col)*xres;
+    if (dr*dr + dk*dk > radius*radius) continue;
+
     index[l] = nfree++;
   }
 
