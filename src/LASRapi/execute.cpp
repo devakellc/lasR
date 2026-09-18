@@ -175,6 +175,10 @@ ReturnType execute(const std::string& config_file)
 
       if (!lascatalog->set_auto_chunk(budget, bytes_per_point, bytes_per_area)) throw std::runtime_error(last_error);
     }
+    else
+    {
+      log(flog, verbose, "  Chunks not sized: %s unknown\n", ram == 0 ? "available RAM" : "point size");
+    }
 
     int n = lascatalog->get_number_chunks();
 
