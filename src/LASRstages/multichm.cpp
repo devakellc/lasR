@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
 
 // 95th percentile of the n first values of a sorted run. Same convention as MetricManager::percentile
 static float percentile95(const float* x, uint32_t n)
@@ -284,11 +285,14 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
 }
 
 // Sort the candidates by decreasing height and keep those far enough from the trees already
-// retained. Ties are broken on the coordinates to get a reproducible order
+// retained. Ties are broken on the coordinates to get a reproducible order.
+// Retained trees are bucketed on a MAX(dist_2d, dist_3d) grid so a candidate only scans its
+// 3x3 neighbourhood instead of every tree kept so far.
 void LASRmultichm::select_trees(std::vector<Maximum>& maxima) const
 {
   double d2d = dist_2d*dist_2d;
   double d3d = dist_3d*dist_3d;
+  double cell = MAX(dist_2d, dist_3d);
 
   std::sort(maxima.begin(), maxima.end(), [](const Maximum& a, const Maximum& b)
   {
@@ -298,22 +302,46 @@ void LASRmultichm::select_trees(std::vector<Maximum>& maxima) const
   });
 
   std::vector<Maximum> trees;
+  std::unordered_map<uint64_t, std::vector<uint32_t>> buckets;
+
+  auto bucket_key = [cell](double x, double y) -> uint64_t
+  {
+    int32_t bx = (int32_t)std::floor(x/cell);
+    int32_t by = (int32_t)std::floor(y/cell);
+    return (((uint64_t)(uint32_t)bx) << 32) | (uint32_t)by;
+  };
 
   for (const auto& m : maxima)
   {
+    int32_t bx = (int32_t)std::floor(m.x/cell);
+    int32_t by = (int32_t)std::floor(m.y/cell);
     bool detected = true;
 
-    for (const auto& t : trees)
+    for (int dbx = -1 ; dbx <= 1 && detected ; dbx++)
     {
-      double dx = m.x - t.x;
-      double dy = m.y - t.y;
-      double dz = m.z - t.z;
-      double dd = dx*dx + dy*dy;
+      for (int dby = -1 ; dby <= 1 && detected ; dby++)
+      {
+        auto it = buckets.find((((uint64_t)(uint32_t)(bx+dbx)) << 32) | (uint32_t)(by+dby));
+        if (it == buckets.end()) continue;
 
-      if (dd < d2d || dd + dz*dz < d3d) { detected = false; break; }
+        for (uint32_t idx : it->second)
+        {
+          const Maximum& t = trees[idx];
+          double dx = m.x - t.x;
+          double dy = m.y - t.y;
+          double dz = m.z - t.z;
+          double dd = dx*dx + dy*dy;
+
+          if (dd < d2d || dd + dz*dz < d3d) { detected = false; break; }
+        }
+      }
     }
 
-    if (detected) trees.push_back(m);
+    if (detected)
+    {
+      buckets[bucket_key(m.x, m.y)].push_back((uint32_t)trees.size());
+      trees.push_back(m);
+    }
   }
 
   maxima.swap(trees);
