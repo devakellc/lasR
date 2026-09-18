@@ -216,8 +216,13 @@ bool Vector::write(const PointXYZAttrs& p)
     return false; // # nocov
   }
 
-  // Write only points inside the bounding box
+  // Write only points inside the bounding box and inside the area of interest
   if (p.x < extent[0] || p.x > extent[2] || p.y < extent[1] || p.y > extent[3])
+  {
+    return true;
+  }
+
+  if (aoi != nullptr && !aoi->contains(p.x, p.y))
   {
     return true;
   }
