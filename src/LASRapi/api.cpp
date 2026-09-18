@@ -202,6 +202,17 @@ Pipeline info()
   return Pipeline(s);
 }
 
+Pipeline keep_latest(double res, double window, std::string use_attribute, std::vector<std::string> filter)
+{
+  Stage s("keep_latest");
+  s.set("res", res);
+  s.set("window", window);
+  s.set("use_attribute", use_attribute);
+  s.set("filter", filter);
+
+  return Pipeline(s);
+}
+
 Pipeline load_raster(std::string file, int band)
 {
   Stage s("load_raster");

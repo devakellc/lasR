@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 
+import pytest
+
 # Add the parent directory to sys.path to import pylasr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -230,6 +232,48 @@ class TestIntegrationWorkflows(unittest.TestCase):
                 self.assertIsInstance(result['data'], list, "Data field must be a list")
         except Exception as e:
             self.fail(f"Pipeline execution raised an exception: {e}")
+
+
+class TestKeepLatest(unittest.TestCase):
+    """Regression test for keep_latest's GPS week-time warning"""
+
+    @pytest.fixture(autouse=True)
+    def _inject_capfd(self, capfd):
+        # warning()/print() write straight to the C fd, bypassing sys.stderr, so only an
+        # fd-level capture (pytest's own, not contextlib.redirect_stderr) sees them
+        self.capfd = capfd
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.megaplot = None
+        megaplot_paths = [
+            "../inst/extdata/Megaplot.las",
+            "../../inst/extdata/Megaplot.las",
+            "../../../inst/extdata/Megaplot.las",
+        ]
+        for path in megaplot_paths:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                self.megaplot = full_path
+                break
+        if self.megaplot is None:
+            self.skipTest("Megaplot.las not found")
+
+    def test_warns_on_week_time_gpstime(self):
+        # Megaplot.las stores GPS week time (global encoding bit 0 unset), which wraps every
+        # week and does not order two acquisitions from different weeks
+        pipeline = pylasr.reader_coverage() + pylasr.keep_latest(res=2.0, window=10.0)
+        self.capfd.readouterr()
+        pylasr.execute(pipeline, self.megaplot)
+        self.assertIn("GPS week time", self.capfd.readouterr().err)
+
+    def test_no_week_time_warning_for_another_attribute(self):
+        pipeline = pylasr.reader_coverage() + pylasr.keep_latest(res=2.0, window=10.0, use_attribute="Intensity")
+        self.capfd.readouterr()
+        pylasr.execute(pipeline, self.megaplot)
+        self.assertNotIn("GPS week time", self.capfd.readouterr().err)
 
 
 class TestErrorHandling(unittest.TestCase):

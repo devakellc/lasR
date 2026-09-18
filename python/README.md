@@ -120,6 +120,7 @@ pipeline.set_nested_strategy(ncores1=2, ncores2=4)
 - `delete_noise()` - Remove noise points (convenience function)
 - `delete_ground()` - Remove ground points (convenience function)
 - `filter_with_grid()` - Grid-based point filtering
+- `keep_latest()` - Keep the most recent acquisition where several overlap
 
 ### Point Operations & Attributes
 - `edit_attribute()` - Modify point attribute values
