@@ -585,13 +585,10 @@ keep_attributes = function(names){ .APISTAGES$keep_attributes(names) }
 
 #' Keep the most recent acquisition
 #'
-#' Where several acquisitions cover the same ground, keep the points of the most recent one and
-#' drop the others. The area is gridded at `res`, the latest value of `use_attribute` is found in
-#' each cell, and a point trailing that value by more than `window` is deleted. A cell reached by
-#' a single acquisition has its own time as the latest, so nothing there is dropped: an older
-#' survey survives where it is the only cover, which a threshold on `gpstime` alone cannot do.
-#' This holds as long as `window` exceeds the duration of one acquisition. Below that, two passes
-#' of the same survey crossing a cell are read as two acquisitions and the earlier one is dropped.
+#' Where several acquisitions cover the same ground, keep the points of the most recent one. The
+#' area is gridded at `res` and, in each cell, a point older than the latest value of
+#' `use_attribute` by more than `window` is deleted, so an older acquisition is kept where it is
+#' the only cover.
 #'
 #' The acquisitions must reach the same chunk to be compared, which is the case for a query —
 #' \link{reader_polygons} or \link{reader_rectangles}. Reading a collection file by file gives
