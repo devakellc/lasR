@@ -921,22 +921,32 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
     chunk.main_files.push_back(files[index].string());
     chunk.name = files[index].stem().string() + "_" + std::to_string(i);
     chunk.crs = headers[index].crs;
-    return true;
+  }
+  else
+  {
+    // There are multiple files. All the files are part of the main
+    chunk.crs = headers[indexes[0]].crs;
+    for (auto index : indexes)
+    {
+      // The files of a query are merged in a single read. Points of two CRS cannot be mixed
+      if (!(headers[index].crs == chunk.crs))
+      {
+        last_error = "the query at [" + std::to_string(minx) + ", " + std::to_string(miny) + ", " + std::to_string(maxx) + ", " + std::to_string(maxy) + "] spans files with different CRS";
+        return false;
+      }
+
+      chunk.main_files.push_back(files[index].string());
+      if (chunk.name.empty()) chunk.name = files[index].stem().string() + "_" + std::to_string(i);
+    }
   }
 
-  // There are multiple files. All the files are part of the main
-  chunk.crs = headers[indexes[0]].crs;
-  for (auto index : indexes)
+  // The query is expressed in the CRS of the collection, harmonized from the first file. A
+  // matched file in another CRS would need that query reprojected before reading, which is
+  // not supported yet: refuse rather than read the wrong location.
+  if (crs.is_valid() && chunk.crs.is_valid() && !(chunk.crs == crs))
   {
-    // The files of a query are merged in a single read. Points of two CRS cannot be mixed
-    if (!(headers[index].crs == chunk.crs))
-    {
-      last_error = "the query at [" + std::to_string(minx) + ", " + std::to_string(miny) + ", " + std::to_string(maxx) + ", " + std::to_string(maxy) + "] spans files with different CRS";
-      return false;
-    }
-
-    chunk.main_files.push_back(files[index].string());
-    if (chunk.name.empty()) chunk.name = files[index].stem().string() + "_" + std::to_string(i);
+    last_error = "the query at [" + std::to_string(minx) + ", " + std::to_string(miny) + ", " + std::to_string(maxx) + ", " + std::to_string(maxy) + "] targets a file whose CRS differs from the collection's";
+    return false;
   }
 
   // We search the file that contains the centroid of the query to assign a name to the query
@@ -955,6 +965,9 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
     for (auto index : indexes)
     {
       std::string file = files[index].string();
+
+      // A neighbour in another CRS cannot be merged with the main file in a single read
+      if (!(headers[index].crs == chunk.crs)) continue;
 
       // if the file is not part of the main files
       auto it = std::find(chunk.main_files.begin(), chunk.main_files.end(), file);

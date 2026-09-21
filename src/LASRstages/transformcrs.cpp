@@ -22,8 +22,7 @@ LASRtransformcrs::LASRtransformcrs(const LASRtransformcrs& other) : Stage(other)
   transform_z = other.transform_z;
   target_to_source_buffer_scale = other.target_to_source_buffer_scale;
   target_to_source_buffer_scale_valid = other.target_to_source_buffer_scale_valid;
-  // OGRCoordinateTransformation is not thread-safe and not trivially copyable.
-  // Each clone lazily rebuilds its own transform from source_crs/target_crs.
+  // OGRCoordinateTransformation is not thread-safe: each clone rebuilds its own
   transform = nullptr;
 }
 
@@ -70,9 +69,8 @@ bool LASRtransformcrs::set_parameters(const nlohmann::json& stage)
 
 void LASRtransformcrs::set_crs(const CRS& crs)
 {
-  // The CRS flowing into this stage is the source of the reprojection.
   source_crs = crs;
-  // The next stages (and writers) must see the target CRS.
+  // downstream stages and writers see the target CRS
   resolve_vertical();
 }
 
@@ -136,8 +134,7 @@ bool LASRtransformcrs::build_transform()
   OGRSpatialReference oSourceSRS = source_crs.get_crs();
   OGRSpatialReference oTargetSRS = target_crs.get_crs();
 
-  // Use traditional GIS axis order (x = lon/easting, y = lat/northing) so coordinates
-  // are not swapped under modern PROJ authority-compliant axis ordering.
+  // Traditional GIS axis order (x = lon/easting) avoids a swap under PROJ's default authority order
   oSourceSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
   oTargetSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
 
@@ -170,10 +167,8 @@ bool LASRtransformcrs::build_transform()
 
 void LASRtransformcrs::get_extent(double& xmin, double& ymin, double& xmax, double& ymax)
 {
-  // The source CRS is known once set_crs() has been called by the parser. When it is
-  // (the normal case), reproject the coverage extent so downstream stages (e.g. the
-  // master raster of rasterize) are sized in the target CRS. Otherwise (e.g. during
-  // get_pipeline_info() without files) leave the extent unchanged.
+  // Reproject the coverage extent so downstream stages (e.g. rasterize's master raster)
+  // are sized in the target CRS; left unchanged when the source CRS is not known yet
   if (source_crs.is_valid() && target_crs.is_valid())
   {
     const double sxmin = xmin, symin = ymin, sxmax = xmax, symax = ymax;
@@ -199,13 +194,8 @@ double LASRtransformcrs::translate_buffer_to_input(double downstream_buffer) con
 {
   if (!target_to_source_buffer_scale_valid) return downstream_buffer;
 
-  // Fixed-distance stages after a projected -> geographic reprojection still ask for a
-  // physical halo (e.g. triangulate()'s 20 source metres). The transform stage converts
-  // that halo to target degrees in set_chunk(), so the reader-side buffer should remain
-  // in the projected source units here. In the inverse direction, and for projected CRSs
-  // with different local units/scales, convert the target-side halo back to source units
-  // so the reader does not request an enormous geographic buffer or under-read a projected
-  // one. set_chunk() applies the opposite conversion before downstream stages consume it.
+  // A downstream halo (e.g. triangulate()'s 20 m) is in target units; convert back to source
+  // units for the reader. Degrees are not a distance, so a geographic side is left unscaled
   if (source_crs.is_geographic() && target_crs.is_geographic())
     return downstream_buffer;
 
@@ -219,8 +209,7 @@ bool LASRtransformcrs::set_chunk(Chunk& chunk)
 {
   Stage::set_chunk(chunk);
 
-  // The chunk carries the CRS of the files it reads. The CRS seen at parse time is the one
-  // of the collection and only serves when the chunk does not know better.
+  // chunk.crs carries the CRS an earlier CRS-changing stage left, or the file's own CRS
   if (chunk.crs.is_valid() && !(chunk.crs == source_crs))
   {
     source_crs = chunk.crs;
@@ -243,14 +232,15 @@ bool LASRtransformcrs::set_chunk(Chunk& chunk)
 
   if (source_crs.is_valid() && target_crs.is_valid())
   {
+    // Built here rather than lazily in process() so an unbuildable pair fails at this chunk
+    if (!build_transform()) return false;
+
     const double sxmin = chunk.xmin, symin = chunk.ymin, sxmax = chunk.xmax, symax = chunk.ymax;
     double x0 = sxmin, y0 = symin, x1 = sxmax, y1 = symax;
 
-    if (reproject_bbox(source_crs, target_crs, x0, y0, x1, y1))
+    if (reproject_bbox(transform, x0, y0, x1, y1))
     {
-      // The reader consumes the chunk buffer in source coordinates. Downstream stages
-      // consume it after the coordinates have been transformed, so convert the source-side
-      // halo to target units before passing the chunk along.
+      // The reader wants the buffer in source units; downstream stages want it in target units
       const double src_diag = std::hypot(sxmax - sxmin, symax - symin);
       const double tgt_diag = std::hypot(x1 - x0, y1 - y0);
       if (src_diag > 0 && tgt_diag > 0 &&
@@ -272,12 +262,13 @@ bool LASRtransformcrs::set_chunk(Chunk& chunk)
     }
     else
     {
-      // The whole chunk extent is outside the transformation domain. Do not abort the run:
-      // process() drops the individual out-of-domain points and keeps the rest. Leave the
-      // chunk extent unreprojected (it produces no output anyway) and warn.
+      // Outside the transform domain: leave the extent as-is, process() drops the points
       warning("transform_crs: could not reproject a chunk extent (outside the transformation domain).\n");
     }
   }
+
+  // A later stage, including another transform_crs, must see the CRS this stage produces
+  if (target_crs.is_valid()) chunk.crs = this->crs.is_valid() ? this->crs : target_crs;
 
   return true;
 }
@@ -293,9 +284,7 @@ bool LASRtransformcrs::process(PointCloud*& las)
   Attribute& attr_y = schema.attributes[AttributeCore::Y];
   Attribute& attr_z = schema.attributes[AttributeCore::Z];
 
-  // get_x()/get_y() (and the writers) only understand INT32, FLOAT and DOUBLE for the
-  // core coordinates; any other storage type decodes to 0. Refuse those rather than
-  // silently corrupting the points.
+  // get_x()/get_y() and the writers only decode INT32, FLOAT and DOUBLE; anything else reads as 0
   auto is_supported = [](AttributeType t)
   { return t == AttributeType::INT32 || t == AttributeType::FLOAT || t == AttributeType::DOUBLE; };
   if (!is_supported(attr_x.type) || !is_supported(attr_y.type) || (transform_z && !is_supported(attr_z.type)))
@@ -304,29 +293,17 @@ bool LASRtransformcrs::process(PointCloud*& las)
     return false;
   }
 
-  // LAS stores X/Y as scaled 32-bit integers (scale/offset matter); PCD and other formats
-  // may store them as float/double, which carry the coordinate directly and ignore
-  // scale/offset (see Point::get_core_attribute_as_double). Both cases are handled below.
+  // LAS stores X/Y as scaled int32; PCD and other formats store them directly as float/double
   const bool x_int = (attr_x.type == AttributeType::INT32);
   const bool y_int = (attr_y.type == AttributeType::INT32);
   const bool z_int = (attr_z.type == AttributeType::INT32);
 
-  // X/Y are always reprojected; Z is reprojected too when the target CRS describes the
-  // heights (transform_z, see resolve_vertical()), otherwise it is preserved as-is. While
-  // reading, get_x()/get_y() decode with the source scale/offset because the schema is not
-  // modified until the very end.
+  // Z is reprojected only when the target describes the heights (transform_z), otherwise preserved as-is
 
-  // Pick X/Y scale factors suited to the target CRS. Reusing a projected scale (e.g. 0.01 m)
-  // for a geographic target would give ~1 km resolution, while reusing a geographic scale
-  // (e.g. 1e-7 deg) for a projected target would overflow the 32-bit stored integers. These
-  // apply to INT32 storage directly and, for float/double storage, are used by write_las()
-  // when it quantizes the coordinates to LAS int32.
-  //
-  // For an INT32 source the schema scale is the real LAS quantization step, so it is reused for
-  // a projected target. For a float/double source (e.g. PCD) the schema scale is a placeholder
-  // (typically 1.0) that is meaningless as a quantization step, so a target-appropriate scale is
-  // always chosen -- otherwise a projected->projected transform would write LAS at whole-unit
-  // resolution.
+  // A projected scale (e.g. 0.01 m) reused for a geographic target gives ~1 km resolution, and
+  // a geographic scale (e.g. 1e-7 deg) reused for a projected target overflows the int32 range,
+  // so the scale is picked for the target rather than kept from the source -- except int32 ->
+  // projected, where the source scale is a real quantization step worth keeping
   double new_sx;
   double new_sy;
   if (target_crs.is_geographic())
@@ -346,16 +323,10 @@ bool LASRtransformcrs::process(PointCloud*& las)
     new_sx = new_sy = 0.01;
   }
 
-  // Choose X/Y offsets near the reprojected data so the stored/written integers stay small.
-  // Needed for INT32 storage and ALSO for float/double storage: write_las() quantizes to LAS
-  // int32 using the scale/offset recorded on the header, so a representative offset must be
-  // computed for every storage type even though in-memory float/double decoding ignores it.
-  // The reprojected
-  // center of the source bounding box is the natural choice, but it can itself fall outside the
-  // transform domain (e.g. data straddling a projection or UTM-zone boundary, so the centroid
-  // is undefined) even when the points are fine. Probe the center, then the bbox corners and
-  // edge midpoints, and use the first that reprojects. If none do, fall back to 0 (every point
-  // will be dropped below anyway). Never abort the stage here.
+  // An offset near the reprojected data keeps the stored/written integers small; write_las()
+  // needs it for float/double storage too. The bbox centroid can itself be outside the
+  // transform domain (e.g. a UTM-zone boundary), so probe it, then the corners and edge
+  // midpoints, and keep the first that reprojects; 0 if none do (every point is dropped below)
   double ox = 0.0;
   double oy = 0.0;
   {
@@ -371,8 +342,7 @@ bool LASRtransformcrs::process(PointCloud*& las)
     }
   }
 
-  // Transform in batches: OGRCoordinateTransformation has a non-negligible per-call
-  // overhead, so transforming arrays is much faster than one point at a time.
+  // Batched: OGRCoordinateTransformation's per-call overhead makes arrays much faster
   const size_t BATCH = 65536;
   std::vector<double> xs(BATCH), ys(BATCH), zs(BATCH);
   std::vector<unsigned char*> ptrs(BATCH);
@@ -381,9 +351,8 @@ bool LASRtransformcrs::process(PointCloud*& las)
   size_t n_outside = 0; // dropped: outside the transformation domain
   size_t n_range = 0;   // dropped: not representable as a 32-bit integer
 
-  // Store one reprojected coordinate honoring the storage type. Returns false if an INT32
-  // coordinate would overflow the 32-bit range (so the point can be dropped rather than
-  // silently wrapping to a garbage location).
+  // Stores one reprojected coordinate; false if an int32 target would overflow, so the caller
+  // can drop the point rather than wrap it to a garbage location
   auto store = [](unsigned char* base, const Attribute& a, bool is_int, double value, double new_s, double off) -> bool
   {
     unsigned char* ptr = base + a.offset;
@@ -445,20 +414,14 @@ bool LASRtransformcrs::process(PointCloud*& las)
   }
   flush(n);
 
-  // Record the target CRS scale/offset on the lasR header for BOTH axes regardless of storage
-  // type: write_las() quantizes the reprojected coordinates to LAS int32 using these, so they
-  // must be sized for the target CRS even for float/double sources (otherwise sub-unit lon/lat
-  // collapses under the default 1.0 scale factor when written to LAS).
+  // write_las() quantizes to LAS int32 from these regardless of source storage type
   las->header->x_scale_factor = new_sx;
   las->header->y_scale_factor = new_sy;
   las->header->x_offset = ox;
   las->header->y_offset = oy;
 
-  // The in-memory schema scale/offset are only meaningful for INT32 storage (LAS), where the
-  // stored integers must decode to the reprojected coordinates. For float/double storage (PCD)
-  // the coordinate is stored directly and every in-memory accessor (get_x, AttributeAccessor,
-  // the kd-tree) expects identity scale/offset, so the schema is left untouched; the LAS writer
-  // reads the header scale/offset for those axes instead.
+  // The in-memory schema scale/offset matter only for int32 storage; float/double accessors
+  // expect identity scale/offset, and write_las() reads the header ones for those axes instead
   if (x_int)
   {
     attr_x.scale_factor = new_sx;
@@ -470,7 +433,6 @@ bool LASRtransformcrs::process(PointCloud*& las)
     attr_y.value_offset = oy;
   }
 
-  // Tag the data with the target CRS.
   las->header->crs = this->crs;
 
   const size_t n_dropped = n_outside + n_range;
@@ -480,9 +442,8 @@ bool LASRtransformcrs::process(PointCloud*& las)
 
   if (las->npoints == 0)
   {
-    // Every point fell outside the target CRS domain. update_header() leaves the bounding
-    // box at its inverted sentinels (min > max) for an empty cloud; reset it to a benign
-    // value so the empty result is not propagated downstream as a corrupt extent.
+    // update_header() leaves an inverted bbox (min > max) for an empty cloud; reset it so an
+    // empty result is not propagated downstream as a corrupt extent
     las->header->min_x = las->header->max_x = ox;
     las->header->min_y = las->header->max_y = oy;
     las->header->min_z = las->header->max_z = 0.0;

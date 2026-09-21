@@ -26,6 +26,7 @@ CRS::CRS(int code, bool err)
   {
     char buffer[512];
     snprintf(buffer, sizeof(buffer), "EPSG:%d %s\n", epsg, CPLGetLastErrorMsg());
+    CPLPopErrorHandler();
     if (err) throw std::runtime_error(buffer);
     return;
   }
@@ -62,6 +63,7 @@ CRS::CRS(const std::string& str, bool err)
   {
     char buffer[2048];
     snprintf(buffer, sizeof(buffer), "WKT string: %s", CPLGetLastErrorMsg());
+    CPLPopErrorHandler();
     if (err) throw std::runtime_error(buffer);
     return;
   }
@@ -140,7 +142,10 @@ int CRS::get_vertical_epsg() const
 
 bool CRS::operator==(const CRS& other) const
 {
-  return epsg == other.epsg && valid == other.valid && wkt == other.wkt;
+  if (epsg == other.epsg && valid == other.valid && wkt == other.wkt) return true;
+
+  // The same CRS can be written in several WKT
+  return valid && other.valid && oSRS.IsSame(&other.oSRS);
 }
 
 // # nocov start
@@ -173,9 +178,6 @@ bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& 
 {
   if (!source.is_valid() || !target.is_valid()) return false;
 
-  // Nothing to do for an empty/unset extent.
-  if (xmin > xmax || ymin > ymax) return true;
-
   OGRSpatialReference oSourceSRS = source.get_crs();
   OGRSpatialReference oTargetSRS = target.get_crs();
 
@@ -189,6 +191,18 @@ bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& 
   CPLPopErrorHandler();
 
   if (ct == nullptr) return false;
+
+  bool ok = reproject_bbox(ct, xmin, ymin, xmax, ymax);
+  OGRCoordinateTransformation::DestroyCT(ct);
+  return ok;
+}
+
+bool reproject_bbox(OGRCoordinateTransformation* ct, double& xmin, double& ymin, double& xmax, double& ymax)
+{
+  if (ct == nullptr) return false;
+
+  // Nothing to do for an empty/unset extent.
+  if (xmin > xmax || ymin > ymax) return true;
 
   const int N = 8; // number of samples per edge
   std::vector<double> xs;
@@ -209,7 +223,6 @@ bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& 
 
   std::vector<int> ok(xs.size(), 0);
   ct->Transform((int)xs.size(), xs.data(), ys.data(), nullptr, ok.data());
-  OGRCoordinateTransformation::DestroyCT(ct);
 
   double nxmin = std::numeric_limits<double>::max();
   double nymin = std::numeric_limits<double>::max();
