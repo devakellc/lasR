@@ -94,7 +94,7 @@ bool LASRlaswriter::process(Point*& p)
   }
 
   //  If the point in not in the buffer we can write it
-  if (keep_buffer || !p->inside_buffer(xmin, ymin, xmax, ymax, circular))
+  if (keep_buffer || (!p->inside_buffer(xmin, ymin, xmax, ymax, circular) && aoi_contains(p->get_x(), p->get_y())))
   {
     if (!pointfilter.filter(p))
     {
@@ -188,6 +188,7 @@ bool LASRlaswriter::set_chunk(Chunk& chunk)
   Stage::set_chunk(chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax);
   if (chunk.buffer == 0) keep_buffer = true;
   circular = chunk.shape == ShapeType::CIRCLE;
+  aoi = chunk.aoi;
   return true;
 }
 

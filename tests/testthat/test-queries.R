@@ -170,3 +170,108 @@ test_that("circle buffer is removed #143",
 
 
 
+
+test_that("an area of interest clips the coverage",
+{
+  f <- system.file("extdata", "Topography.las", package = "lasR")
+
+  full  <- "POLYGON((273357 5274357, 273643 5274357, 273643 5274643, 273357 5274643, 273357 5274357))"
+  left  <- "POLYGON((273357 5274357, 273500 5274357, 273500 5274643, 273357 5274643, 273357 5274357))"
+  right <- "POLYGON((273500 5274357, 273643 5274357, 273643 5274643, 273500 5274643, 273500 5274357))"
+  away  <- "POLYGON((280000 5280000, 280100 5280000, 280100 5280100, 280000 5280100, 280000 5280000))"
+
+  u <- exec(reader(aoi = full) + summarise(), on = f)
+  expect_equal(u$npoints, 73403)
+
+  # the two halves partition the point cloud
+  u <- exec(reader(aoi = left) + summarise(), on = f)
+  expect_equal(u$npoints, 29847)
+
+  u <- exec(reader(aoi = right) + summarise(), on = f)
+  expect_equal(u$npoints, 43556)
+
+  u <- exec(reader(aoi = away) + summarise(), on = f)
+  expect_equal(u$npoints, 0)
+})
+
+test_that("an area of interest supports holes, multipolygons and concave rings",
+{
+  f <- system.file("extdata", "Topography.las", package = "lasR")
+
+  holed <- paste0("POLYGON((273357 5274357, 273643 5274357, 273643 5274643, 273357 5274643, 273357 5274357), ",
+                  "(273450 5274450, 273550 5274450, 273550 5274550, 273450 5274550, 273450 5274450))")
+  hole  <- "POLYGON((273450 5274450, 273550 5274450, 273550 5274550, 273450 5274550, 273450 5274450))"
+  multi <- paste0("MULTIPOLYGON(((273357 5274357, 273500 5274357, 273500 5274643, 273357 5274643, 273357 5274357)), ",
+                  "((273500 5274357, 273643 5274357, 273643 5274643, 273500 5274643, 273500 5274357)))")
+  concave <- paste0("POLYGON((273357 5274357, 273500 5274357, 273500 5274500, 273643 5274500, ",
+                    "273643 5274643, 273357 5274643, 273357 5274357))")
+
+  u <- exec(reader(aoi = holed) + summarise(), on = f)
+  expect_equal(u$npoints, 64385)
+
+  u <- exec(reader(aoi = hole) + summarise(), on = f)
+  expect_equal(u$npoints, 9018)
+
+  # the two parts cover the whole file
+  u <- exec(reader(aoi = multi) + summarise(), on = f)
+  expect_equal(u$npoints, 73403)
+
+  u <- exec(reader(aoi = concave) + summarise(), on = f)
+  expect_equal(u$npoints, 53153)
+})
+
+test_that("an area of interest can be given as coordinate rings",
+{
+  f <- system.file("extdata", "Topography.las", package = "lasR")
+
+  ring = matrix(c(273357, 5274357, 273500, 5274357, 273500, 5274643, 273357, 5274643, 273357, 5274357), ncol = 2, byrow = TRUE)
+
+  u <- exec(reader(aoi = ring) + summarise(), on = f)
+  expect_equal(u$npoints, 29847)
+
+  u <- exec(reader(aoi = list(ring)) + summarise(), on = f)
+  expect_equal(u$npoints, 29847)
+
+  expect_error(exec(reader(aoi = "POLYGON((0 0, 1 1") + summarise(), on = f), "cannot parse the geometry")
+  expect_error(exec(reader(aoi = "POINT(0 0)") + summarise(), on = f), "POLYGON or a MULTIPOLYGON")
+})
+
+test_that("an area of interest masks the raster and drives the chunking",
+{
+  f <- system.file("extdata", "Topography.las", package = "lasR")
+
+  concave <- paste0("POLYGON((273357 5274357, 273500 5274357, 273500 5274500, 273643 5274500, ",
+                    "273643 5274643, 273357 5274643, 273357 5274357))")
+
+  u <- exec(reader(aoi = concave) + rasterize(2, "zmax"), on = f)
+  expect_s4_class(u, "SpatRaster")
+
+  # the quarter the area of interest excludes is entirely NA
+  cropped <- terra::crop(u, terra::ext(273500, 273643, 5274357, 5274500))
+  expect_equal(sum(!is.na(cropped[])), 0L)
+
+  # the polygons chunk the coverage themselves and a chunk size tiles them further
+  u <- exec(reader(aoi = concave) + summarise(), on = f, chunk = 100)
+  expect_equal(u$npoints, 53153)
+
+  # the tiles cover the area of interest only: the excluded quarter has no chunk at all
+  u <- exec(reader(aoi = concave) + rasterize(2, "zmax"), on = f, chunk = 100)
+  cropped <- terra::crop(u, terra::ext(273500, 273643, 5274357, 5274500))
+  expect_equal(sum(!is.na(cropped[])), 0L)
+})
+
+test_that("an area of interest clips the vector outputs",
+{
+  f <- system.file("extdata", "Topography.las", package = "lasR")
+
+  concave <- paste0("POLYGON((273357 5274357, 273500 5274357, 273500 5274500, 273643 5274500, ",
+                    "273643 5274643, 273357 5274643, 273357 5274357))")
+
+  u <- exec(reader() + local_maximum(5), on = f)
+  expect_equal(nrow(u), 2425L)
+
+  # the tree tops the area of interest excludes are not written
+  u <- exec(reader(aoi = concave) + local_maximum(5), on = f)
+  expect_equal(nrow(u), 1827L)
+  expect_true(all(sf::st_coordinates(u)[,"X"] <= 273500 | sf::st_coordinates(u)[,"Y"] >= 5274500))
+})
