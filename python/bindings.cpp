@@ -442,6 +442,13 @@ PYBIND11_MODULE(pylasr, m) {
     py::arg("connect_uid"), py::arg("ws"), py::arg("min_height") = 2.0,
     py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "");
 
+    m.def("multichm", &api::multichm,
+          "Individual tree detection on a multi CHM",
+          py::arg("res") = 1.0, py::arg("ws") = 3.0, py::arg("min_height") = 2.0,
+          py::arg("layer_thickness") = 0.5, py::arg("dist_2d") = 3.0, py::arg("dist_3d") = 5.0,
+          py::arg("use_max") = false,
+          py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "");
+
     m.def("callback", [](py::object fun, const std::string& expose, py::object args, bool drop_buffer, bool no_las_update) {
         if (!py::hasattr(fun, "__call__"))
             throw py::type_error("fun must be callable");
@@ -504,7 +511,7 @@ PYBIND11_MODULE(pylasr, m) {
         std::string uid_seeds = extract_uid(connect_uid_seeds);
         return api::region_growing(uid_raster, uid_seeds, th_tree, th_seed, th_cr, max_cr, ofile);
     },
-    "Perform region growing segmentation",
+    "Perform region growing segmentation. Seeds accept any tree top stage: local_maximum, local_maximum_raster or multichm.",
     py::arg("connect_uid_raster"), py::arg("connect_uid_seeds"),
     py::arg("th_tree") = 2.0, py::arg("th_seed") = 0.45, py::arg("th_cr") = 0.55,
     py::arg("max_cr") = 20.0, py::arg("ofile") = "");

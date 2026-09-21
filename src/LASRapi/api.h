@@ -207,6 +207,7 @@ Pipeline load_raster(std::string file, int band = 1L);
 Pipeline load_matrix(std::vector<double> matrix, bool check = true);
 Pipeline local_maximum(double ws, double min_height = 2, std::vector<std::string> filter = {""}, std::string ofile = "", std::string use_attribute = "Z", bool record_attributes = false, std::string store_in_attribute = "");
 Pipeline local_maximum_raster(std::string connect_uid, double ws, double min_height = 2, std::vector<std::string> filter = {""}, std::string ofile = "");
+Pipeline multichm(double res = 1, double ws = 3, double min_height = 2, double layer_thickness = 0.5, double dist_2d = 3, double dist_3d = 5, bool use_max = false, std::vector<std::string> filter = {""}, std::string ofile = "");
 Pipeline pit_fill(std::string connect_uid, int lap_size = 3, double thr_lap = 0.1, double thr_spk = -0.1, int med_size = 3, int dil_radius = 0, std::string ofile = "");
 Pipeline rasterize(double res, double window, std::vector<std::string> operators = {"max"}, std::vector<std::string> filter = {""}, std::string ofile = "", double default_value = -99999);
 Pipeline rasterize_triangulation(std::string connect_uid, double res, std::string ofile = "");

@@ -144,6 +144,7 @@ pipeline.set_nested_strategy(ncores1=2, ncores2=4)
 - `geometry_features()` - Compute geometric features (eigenvalues, etc.)
 - `local_maximum()` - Find local maxima in point clouds
 - `local_maximum_raster()` - Find local maxima in rasters (tree detection)
+- `multichm()` - Individual tree detection on a multi CHM
 - `triangulate()` - Delaunay triangulation of points  
 - `hulls()` - Compute convex hulls
 
