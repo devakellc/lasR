@@ -121,12 +121,9 @@ bool LASRrasterize::process(PointCloud*& las)
     cells.clear();
   }
 
-  // Loop through each group on which we want to apply the call
-  auto map = grouper.map;
-
   progress->reset();
   progress->set_prefix("Rasterize");
-  progress->set_total(map.size());
+  progress->set_total(grouper.map.size());
   progress->set_ncpu(ncpu);
   progress->show();
 

@@ -37,6 +37,9 @@ public:
 
   // multi-threading
   bool is_parallelizable() const override { return true; };
+
+  // An index per point and the key of every voxel already filled, of which there are no more
+  double memory_per_point() const override { return sizeof(int) + sizeof(int); };
   LASRsamplingpoisson* clone() const override { return new LASRsamplingpoisson(*this); };
 
 private:
@@ -55,6 +58,8 @@ public:
 
   // multi-threading
   bool is_parallelizable() const override { return true; };
+
+  double memory_per_point() const override { return sizeof(int) + 3*sizeof(double); };
   LASRsamplingvoxels* clone() const override { return new LASRsamplingvoxels(*this); };
 
 private:
@@ -75,6 +80,11 @@ public:
 
   // multi-threading
   bool is_parallelizable() const override { return true; };
+
+  double memory_per_point() const override { return sizeof(int); };
+
+  // A bit per pixel of the grid
+  double memory_per_area() const override { return res > 0 ? 0.125/(res*res) : 0; };
   LASRsamplingpixels* clone() const override { return new LASRsamplingpixels(*this); };
 
 private:

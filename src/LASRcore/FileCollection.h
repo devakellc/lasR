@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <filesystem>
 
@@ -18,6 +19,7 @@ enum PathType {DIRECTORY, VPCFILE, LASFILE, LAXFILE, PCDFILE, OTHERFILE, MISSING
 bool is_ept_endpoint(const std::string& path);
 
 class Header;
+class EPTio;
 
 class FileCollectionIndex
 {
@@ -46,6 +48,9 @@ public:
   const PolygonShape* get_aoi() const { return aoi.get(); };
   bool set_noprocess(const std::vector<bool>& b);
   bool set_chunk_size(double size);
+  bool set_auto_chunk(double budget_bytes, double bytes_per_point, double bytes_per_area);
+  size_t estimate_points(double xmin, double ymin, double xmax, double ymax);
+  size_t get_point_size() const;
   bool get_chunk(int index, Chunk& chunk) const;
   int get_number_chunks() const;
   int get_number_files() const;
@@ -106,6 +111,17 @@ private:
   // queries, partial read
   FileCollectionIndex file_index;
   std::vector<Shape*> queries;
+
+  void tile_extent(double xmin, double ymin, double xmax, double ymax, double size, std::vector<Shape*>& tiles) const;
+  size_t count_points(double xmin, double ymin, double xmax, double ymax) const;
+  double peak_density(const Shape* query, double side) const;
+
+  // Nodes of the last EPT estimate, so a tile is counted in memory instead of traversed again
+  struct DensityNode { double xmin, ymin, xmax, ymax; size_t npoints; };
+  std::vector<DensityNode> density_nodes;
+
+  // Kept open by add_ept_endpoint, one per endpoint, so estimate_points can query them without re-parsing ept.json
+  std::unordered_map<std::string, std::unique_ptr<EPTio>> ept_readers;
 
   // area of interest clipping every chunk. Shared because each thread copies the Engine and thus
   // the chunks it works on

@@ -39,6 +39,7 @@ bool LASRmixedreader::build_sources(Chunk& chunk)
   {
     std::shared_ptr<EPTio>& eptio = ept_cache[endpoint];
     if (!eptio) eptio = std::shared_ptr<EPTio>(new EPTio());
+    eptio->set_aoi(chunk.aoi);
 
     // An endpoint already in the cache is already opened: query() only re-traverses the
     // hierarchy for the new extent, it does not re-parse ept.json or re-probe a tile
