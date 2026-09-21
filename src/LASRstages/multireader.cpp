@@ -2,6 +2,12 @@
 
 #include "Fileio.h"
 
+// Same name with another type, scale or offset would be decoded against the wrong Attribute
+static bool same_representation(const Attribute& a, const Attribute& b)
+{
+  return a.type == b.type && a.scale_factor == b.scale_factor && a.value_offset == b.value_offset;
+}
+
 LASRmultireader::LASRmultireader()
 {
   header = nullptr;
@@ -78,7 +84,10 @@ bool LASRmultireader::process(Header*& header)
       {
         bool in_all = true;
         for (const auto& other : others)
-          if (!other.schema.has_attribute(attribute.name)) { in_all = false; break; }
+        {
+          const Attribute* match = other.schema.find_attribute(attribute.name);
+          if (!match || !same_representation(*match, attribute)) { in_all = false; break; }
+        }
 
         if (in_all) merged.add_attribute(attribute);
       }

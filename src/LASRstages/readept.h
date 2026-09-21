@@ -3,6 +3,12 @@
 
 #include "multireader.h"
 
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+class EPTio;
+
 class LASReptreader: public LASRmultireader
 {
 public:
@@ -13,6 +19,9 @@ public:
 
 protected:
   bool build_sources(Chunk& chunk) override;
+
+private:
+  std::unordered_map<std::string, std::shared_ptr<EPTio>> ept_cache;
 };
 
 #endif

@@ -4,12 +4,17 @@
 
 bool LASReptreader::build_sources(Chunk& chunk)
 {
-  for (const auto& file : chunk.main_files)
+  for (size_t i = 0 ; i < chunk.main_files.size() ; i++)
   {
-    auto eptio = std::shared_ptr<EPTio>(new EPTio());
+    const std::string& file = chunk.main_files[i];
+
+    // Keyed by position too: the same endpoint can be listed twice in a chunk
+    std::shared_ptr<EPTio>& eptio = ept_cache[std::to_string(i) + ":" + file];
+    if (!eptio) eptio = std::shared_ptr<EPTio>(new EPTio());
+
     eptio->query(file, chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax,
                  chunk.buffer, chunk.shape == ShapeType::CIRCLE, filters);
-    sources.emplace_back(file, std::move(eptio));
+    sources.emplace_back(file, eptio);
   }
 
   return true;
