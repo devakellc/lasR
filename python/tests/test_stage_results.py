@@ -12,6 +12,7 @@ Run with: python test_comprehensive_suite.py
 
 import pylasr
 import tempfile
+import shutil
 import os
 import json
 import unittest
@@ -355,6 +356,24 @@ class LasRComprehensiveTestSuite(unittest.TestCase):
         error_msg = str(cm.exception)
         self.assertIn("No such file or directory", error_msg, "Error should mention directory issue")
     
+    def test_invalid_las_file_among_others_is_discarded(self):
+        """Test that a corrupted LAS file next to a valid one is discarded, not fatal."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            shutil.copy(self.test_file, temp_dir)
+            with open(os.path.join(temp_dir, "fake.las"), "w") as f:
+                f.write("This is not a LAS file")
+
+            pipeline = pylasr.Pipeline()
+            pipeline += pylasr.summarise()
+            alone = pipeline.execute([self.test_file])
+            with_fake = pipeline.execute([temp_dir])
+
+            npoints = lambda r: next(e["summary"]["npoints"] for e in r["data"] if "summary" in e)
+            self.assertEqual(npoints(with_fake), npoints(alone))
+        finally:
+            shutil.rmtree(temp_dir)
+
     def test_error_invalid_las_file_exception(self):
         """Test that corrupted LAS files raise proper exceptions."""
         # Create a fake LAS file
