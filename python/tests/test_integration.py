@@ -15,7 +15,7 @@ import pytest
 # Add the parent directory to sys.path to import pylasr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test_utils import read_points, write_las
+from test_utils import read_points, read_raster_cells, write_las
 
 try:
     import pylasr
@@ -298,6 +298,76 @@ class TestErrorHandling(unittest.TestCase):
         with self.assertRaises((TypeError, ValueError)):
             # Try to create a pipeline with invalid parameters
             pylasr.classify_with_sor(k="invalid", m="invalid")
+
+
+def _cone_las(path, apex_x, apex_y, apex_h):
+    """A single-apex conical canopy, wide enough to exercise a real max_cr and chunk size"""
+    x, y, z = [], [], []
+    for xi in range(int(apex_x) - 75, int(apex_x) + 76):
+        for yi in range(int(apex_y) - 75, int(apex_y) + 76):
+            d = ((xi - apex_x) ** 2 + (yi - apex_y) ** 2) ** 0.5
+            x.append(float(xi))
+            y.append(float(yi))
+            z.append(max(0.5, apex_h - d))
+    write_las(path, x, y, z)
+
+
+class TestRandomWalker(unittest.TestCase):
+    """Regression tests for random_walker's buffer size and crown radius bugs"""
+
+    APEX = (135.5, 125.5, 30.0)
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+        self.las = os.path.join(self.temp_dir, "cone.las")
+        _cone_las(self.las, *self.APEX)
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _run(self, max_cr, chunk=None):
+        tif = os.path.join(self.temp_dir, f"out_{chunk}.tif")
+        chm = pylasr.rasterize(1.0, 1.0, ["max"])
+        seed = pylasr.local_maximum_raster(chm, 5, min_height=2.0)
+        tree = pylasr.random_walker(chm, seed, max_cr=max_cr, ofile=tif)
+        pipeline = chm + seed + tree
+        if chunk:
+            pipeline.set_chunk(chunk)
+        result = pylasr.execute(pipeline, [self.las])
+        self.assertTrue(result["success"], result.get("message"))
+        return read_raster_cells(tif)
+
+    def test_buffer_derives_from_max_cr(self):
+        """A chunk boundary must not lose cells a seed just beyond it should still own"""
+        unchunked = self._run(max_cr=40.0)
+        chunked = self._run(max_cr=40.0, chunk=50.0)
+        self.assertEqual(len(chunked), len(unchunked))
+
+    def test_crown_radius_enforced(self):
+        """No labeled cell may lie beyond max_cr/2 of the seed that claims it"""
+        max_cr = 10.0
+        apex_x, apex_y, _ = self.APEX
+        cells = self._run(max_cr=max_cr)
+
+        self.assertGreater(len(cells), 0)
+        for x, y, _ in cells:
+            dist = ((x - apex_x) ** 2 + (y - apex_y) ** 2) ** 0.5
+            # +1 cell for the seed-to-cell-center snap, not the sqrt(2) a square window allowed
+            self.assertLessEqual(dist, max_cr / 2 + 1.0)
+
+    def test_max_cr_must_be_positive(self):
+        """A non-positive max_cr must be rejected, not walk the solver off the raster"""
+        chm = pylasr.rasterize(1.0, 1.0, ["max"])
+        seed = pylasr.local_maximum_raster(chm, 5, min_height=2.0)
+        tree = pylasr.random_walker(chm, seed, max_cr=-5.0)
+        pipeline = chm + seed + tree
+
+        with self.assertRaises(ValueError):
+            pylasr.execute(pipeline, [self.las])
 
 
 class TestMultichm(unittest.TestCase):
