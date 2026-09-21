@@ -237,6 +237,66 @@ class TestIntegrationWorkflows(unittest.TestCase):
             self.fail(f"Pipeline execution raised an exception: {e}")
 
 
+class TestTransformCrsVertical(unittest.TestCase):
+    """Regression tests for transform_crs Z handling"""
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.megaplot = None
+        megaplot_paths = [
+            "../inst/extdata/Megaplot.las",
+            "../../inst/extdata/Megaplot.las",
+            "../../../inst/extdata/Megaplot.las",
+        ]
+        for path in megaplot_paths:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                self.megaplot = full_path
+                break
+        if self.megaplot is None:
+            self.skipTest("Megaplot.las not found")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_wkt_shorthand_target_is_stored_as_canonical_wkt(self):
+        # set_crs()/transform_crs() accept GDAL shorthand such as "EPSG:26917+5703" via
+        # SetFromUserInput(). Storing that literal string as the CRS's own WKT (instead of
+        # exporting the parsed spatial reference back to WKT) corrupts write_las(): the literal
+        # shorthand ends up in the WKT VLR, which strict WKT readers reject.
+        baked = os.path.join(self.temp_dir, "baked.las")
+        p0 = pylasr.Pipeline() + pylasr.set_crs("EPSG:26917+5703") + pylasr.write_las(baked)
+        pylasr.execute(p0, self.megaplot)
+
+        pipeline = pylasr.Pipeline() + pylasr.transform_crs("EPSG:32617+5703") + pylasr.summarise()
+        result = pylasr.execute(pipeline, baked)
+        wkt = result["data"][0]["summary"]["crs"]["wkt"]
+
+        self.assertNotEqual(wkt.strip(), "EPSG:32617+5703")
+        self.assertIn("COMPOUNDCRS", wkt)
+
+    def test_two_ellipsoidal_crs_reproject_without_being_treated_as_equal(self):
+        # vertical_id() used to give every uncoded ellipsoidal (3-axis) CRS the same id, -1, so
+        # two different ones (e.g. WGS84 and NAD83(2011)) compared equal and the stage kept the
+        # source Z untouched while still relabelling the output with the target's vertical CRS.
+        baked = os.path.join(self.temp_dir, "baked_4979.las")
+        p0 = pylasr.Pipeline() + pylasr.set_crs(4979) + pylasr.write_las(baked)
+        pylasr.execute(p0, self.megaplot)
+
+        out = os.path.join(self.temp_dir, "out_6319.las")
+        pipeline = pylasr.Pipeline() + pylasr.transform_crs(6319) + pylasr.write_las(out)
+        pylasr.execute(pipeline, baked)
+
+        summary_pipeline = pylasr.Pipeline() + pylasr.summarise()
+        result = pylasr.execute(summary_pipeline, out)
+        self.assertEqual(result["data"][0]["summary"]["crs"]["epsg"], 6319)
+
+
 class TestKeepLatest(unittest.TestCase):
     """Regression test for keep_latest's GPS week-time warning"""
 
@@ -298,6 +358,119 @@ class TestErrorHandling(unittest.TestCase):
         with self.assertRaises((TypeError, ValueError)):
             # Try to create a pipeline with invalid parameters
             pylasr.classify_with_sor(k="invalid", m="invalid")
+
+
+TOPOGRAPHY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "inst", "extdata", "Topography.las")
+
+
+def _summary(result):
+    return next(e["summary"] for e in result["data"] if "summary" in e)
+
+
+class TestEquivalentCrs(unittest.TestCase):
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_same_crs_written_in_another_wkt(self):
+        probe = pylasr.reader_rectangles([0.0], [0.0], [1.0], [1.0]) + pylasr.summarise()
+        wkt = _summary(pylasr.execute(probe, TOPOGRAPHY))["crs"]["wkt"]
+        # renaming the axes changes the text, not the CRS
+        other = wkt.replace('"easting (E(X))"', '"X"').replace('"northing (N(Y))"', '"Y"')
+        self.assertNotEqual(other, wkt)
+
+        copy = os.path.join(self.temp_dir, "copy.las")
+        pylasr.execute(pylasr.reader_coverage() + pylasr.set_crs(other) + pylasr.write_las(copy), TOPOGRAPHY)
+
+        query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
+        one = _summary(pylasr.execute(query + pylasr.summarise(), TOPOGRAPHY))["npoints"]
+        both = _summary(pylasr.execute(query + pylasr.summarise(), [TOPOGRAPHY, copy]))["npoints"]
+        self.assertEqual(both, 2 * one)
+
+
+class TestChunkCrsPropagation(unittest.TestCase):
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _npoints_near_native_extent(self, path):
+        # A hair inside Topography.las's native (EPSG:2949) extent, so a source CRS lost to
+        # a stale chunk.crs (points left in degrees, or shifted to another projection) misses it
+        query = pylasr.reader_rectangles([273357.2], [5274357.2], [273642.8], [5274642.8]) + pylasr.summarise()
+        return _summary(pylasr.execute(query, path))["npoints"]
+
+    def test_chained_transform_crs_returns_to_the_source_crs(self):
+        out = os.path.join(self.temp_dir, "roundtrip.las")
+        pipeline = pylasr.transform_crs(4326) + pylasr.transform_crs(2949) + pylasr.write_las(out)
+        pylasr.execute(pipeline, TOPOGRAPHY)
+
+        baseline = self._npoints_near_native_extent(TOPOGRAPHY)
+        roundtrip = self._npoints_near_native_extent(out)
+        self.assertGreater(roundtrip, 0.9 * baseline)
+
+    def test_set_crs_then_transform_crs_to_the_same_crs_is_identity(self):
+        # Declares a CRS other than the file's own, so chunk.crs (the file's native CRS) and
+        # the declared one disagree; source_crs must follow the declaration, not the file
+        other_epsg = 32619
+        out = os.path.join(self.temp_dir, "identity.las")
+        pipeline = pylasr.set_crs(other_epsg) + pylasr.transform_crs(other_epsg) + pylasr.write_las(out)
+        pylasr.execute(pipeline, TOPOGRAPHY)
+
+        baseline = self._npoints_near_native_extent(TOPOGRAPHY)
+        after = self._npoints_near_native_extent(out)
+        self.assertEqual(after, baseline)
+
+
+class TestQueryAcrossCollectionCrs(unittest.TestCase):
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+        xmid = (273357.14 + 273642.86) / 2
+        self.left = os.path.join(self.temp_dir, "left.las")
+        self.right = os.path.join(self.temp_dir, "right_4326.las")
+
+        pylasr.execute(
+            pylasr.reader_rectangles([273357.14], [5274357.14], [xmid], [5274642.85]) + pylasr.write_las(self.left),
+            TOPOGRAPHY,
+        )
+        pylasr.execute(
+            pylasr.reader_rectangles([xmid], [5274357.14], [273642.86], [5274642.85])
+            + pylasr.transform_crs(4326)
+            + pylasr.write_las(self.right),
+            TOPOGRAPHY,
+        )
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_query_matching_only_a_differently_projected_file_is_refused(self):
+        # The spatial index is in the collection's (left file's) CRS. A query landing only in
+        # the right, EPSG:4326 tile must not be read with catalog-CRS bounds against it
+        query = pylasr.reader_rectangles([273550.0], [5274400.0], [273642.86], [5274600.0]) + pylasr.summarise()
+        with self.assertRaises(Exception):
+            pylasr.execute(query, [self.left, self.right])
+
+    def test_query_matching_only_the_collection_crs_file_still_works(self):
+        query = pylasr.reader_rectangles([273357.14], [5274357.14], [273450.0], [5274500.0]) + pylasr.summarise()
+        result = _summary(pylasr.execute(query, [self.left, self.right]))
+        self.assertGreater(result["npoints"], 0)
 
 
 def _cone_las(path, apex_x, apex_y, apex_h):

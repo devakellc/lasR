@@ -1268,6 +1268,64 @@ set_crs = function(x)
   stop("Invalid argument")
 }
 
+#' Reproject the point cloud
+#'
+#' Reproject (transform) the point cloud from its current CRS to a target CRS. Unlike
+#' \link{set_crs}, which only **assigns** a CRS without modifying the coordinates, this stage
+#' **reprojects** every point using PROJ/GDAL. The horizontal X and Y coordinates are
+#' reprojected, the scale factors and offsets are adapted to the target CRS (e.g. switching
+#' between metres and degrees), the bounding box is updated and the target CRS is assigned to
+#' the data and to all subsequent stages of the pipeline.
+#'
+#' When the target does not describe the heights, only the horizontal coordinates are
+#' reprojected: **Z (elevation) is preserved unchanged**, matching the behaviour of
+#' `gdaltransform`, `sf` and `terra` for 2D targets. The vertical CRS of the source is carried
+#' over to the output, which then reads e.g. `WGS 84 / UTM zone 17N + NAVD88 height`: the
+#' heights are unchanged, so the vertical CRS that describes them is unchanged too.
+#'
+#' When the target does describe the heights — a compound CRS such as `"EPSG:32617+5703"` or a
+#' 3D CRS such as `4979` — Z is reprojected as well, applying the geoid model that separates
+#' the two vertical datums. This requires the source to describe its own heights: assign them
+#' with \link{set_crs} if the files do not carry a vertical CRS, rather than have the stage
+#' guess and shift the heights by tens of metres.
+#'
+#' PROJ falls back to a *ballpark* vertical transformation when the geoid grid it needs is not
+#' installed. Such a transformation leaves Z untouched and reports success, which would label
+#' heights with a vertical CRS that does not describe them, so it is refused instead. Missing
+#' grids can be obtained from \url{https://cdn.proj.org}.
+#'
+#' The source CRS is the CRS carried by the files being read or the one assigned with
+#' \link{set_crs} earlier in the pipeline. The stage therefore typically appears after the
+#' \link{reader}. A point that falls outside the domain of the transformation is dropped.
+#'
+#' A collection may hold files that do not share a CRS. Each file is then reprojected from
+#' its own CRS, and the extents of the collection are expressed in the CRS of the first file
+#' so that the coverage, the chunking and the neighbour search stay meaningful. A query that
+#' spans files of different CRS is refused: such files are merged in a single read and their
+#' points cannot be reprojected together.
+#'
+#' @param crs integer or string. EPSG code or WKT string of the **target** CRS, understood by GDAL.
+#' @export
+#' @md
+#' @examples
+#' \dontrun{
+#' f = system.file("extdata", "Topography.las", package="lasR")
+#'
+#' # Reproject from the file CRS to WGS 84 (lon/lat) and write the result
+#' pipeline = reader_las() + transform_crs(4326) + write_las()
+#' exec(pipeline, on = f)
+#'
+#' # Reproject then rasterize: the output raster is in the target CRS
+#' pipeline = reader_las() + transform_crs(32619) + rasterize(10, "max")
+#' exec(pipeline, on = f)
+#' }
+transform_crs = function(crs)
+{
+  if (is.numeric(crs)) { return(.APISTAGES$transform_crs_epsg(crs)) }
+  if (is.character(crs)) { return(.APISTAGES$transform_crs_wkt(crs)) }
+  stop("Invalid argument")
+}
+
 #' Sample the point cloud
 #'
 #' Sample the point cloud, keeping one random point per pixel or per voxel or perform a poisson sampling.

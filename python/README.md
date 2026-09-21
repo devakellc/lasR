@@ -184,6 +184,7 @@ pipeline = pylasr.reader_polygons(aoi="MULTIPOLYGON(((...)),((...)))") + pylasr.
 
 ### Coordinate Systems
 - `set_crs()` - Set coordinate reference system
+- `transform_crs()` - Reproject to a target coordinate reference system
 
 ### Information & Analysis  
 - `info()` - Get point cloud information and statistics

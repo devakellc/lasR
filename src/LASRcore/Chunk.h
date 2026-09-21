@@ -1,6 +1,7 @@
 #ifndef CHUNK_H
 #define CHUNK_H
 
+#include "CRS.h"
 #include "Shape.h"
 #include <memory>
 #include <string>
@@ -25,6 +26,7 @@ struct Chunk
     ymax = 0;
     id = 0;
     shape = ShapeType::UNKNOWN;
+    crs = CRS();
     aoi = nullptr;
     buffer = 0;
     process = true;
@@ -54,6 +56,7 @@ struct Chunk
   bool process;
   int id;
   ShapeType shape;
+  CRS crs;
   std::shared_ptr<const PolygonShape> aoi; // area of interest clipping the chunk, null when there is none
   std::string name;
   std::vector<std::string> main_files;
