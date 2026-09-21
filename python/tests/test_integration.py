@@ -10,8 +10,12 @@ import sys
 import tempfile
 import unittest
 
+import pytest
+
 # Add the parent directory to sys.path to import pylasr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from test_utils import read_points, write_las
 
 try:
     import pylasr
@@ -233,6 +237,48 @@ class TestIntegrationWorkflows(unittest.TestCase):
             self.fail(f"Pipeline execution raised an exception: {e}")
 
 
+class TestKeepLatest(unittest.TestCase):
+    """Regression test for keep_latest's GPS week-time warning"""
+
+    @pytest.fixture(autouse=True)
+    def _inject_capfd(self, capfd):
+        # warning()/print() write straight to the C fd, bypassing sys.stderr, so only an
+        # fd-level capture (pytest's own, not contextlib.redirect_stderr) sees them
+        self.capfd = capfd
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.megaplot = None
+        megaplot_paths = [
+            "../inst/extdata/Megaplot.las",
+            "../../inst/extdata/Megaplot.las",
+            "../../../inst/extdata/Megaplot.las",
+        ]
+        for path in megaplot_paths:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                self.megaplot = full_path
+                break
+        if self.megaplot is None:
+            self.skipTest("Megaplot.las not found")
+
+    def test_warns_on_week_time_gpstime(self):
+        # Megaplot.las stores GPS week time (global encoding bit 0 unset), which wraps every
+        # week and does not order two acquisitions from different weeks
+        pipeline = pylasr.reader_coverage() + pylasr.keep_latest(res=2.0, window=10.0)
+        self.capfd.readouterr()
+        pylasr.execute(pipeline, self.megaplot)
+        self.assertIn("GPS week time", self.capfd.readouterr().err)
+
+    def test_no_week_time_warning_for_another_attribute(self):
+        pipeline = pylasr.reader_coverage() + pylasr.keep_latest(res=2.0, window=10.0, use_attribute="Intensity")
+        self.capfd.readouterr()
+        pylasr.execute(pipeline, self.megaplot)
+        self.assertNotIn("GPS week time", self.capfd.readouterr().err)
+
+
 class TestErrorHandling(unittest.TestCase):
     """Test error handling and edge cases"""
 
@@ -252,6 +298,62 @@ class TestErrorHandling(unittest.TestCase):
         with self.assertRaises((TypeError, ValueError)):
             # Try to create a pipeline with invalid parameters
             pylasr.classify_with_sor(k="invalid", m="invalid")
+
+
+class TestMultichm(unittest.TestCase):
+    """Regression tests for the multichm buffer size and tie-handling bugs"""
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_buffer_covers_dist_2d(self):
+        """A candidate near a chunk boundary must still see a taller tree suppressing it
+        across dist_2d, even though dist_2d exceeds both ws and dist_3d"""
+        las = os.path.join(self.temp_dir, "buffer.las")
+        write_las(
+            las,
+            [106.5, 112.5, 100.0, 120.0],
+            [105.5, 105.5, 100.0, 110.0],
+            [20.0, 10.0, 0.0, 0.0],
+        )
+
+        def run(chunk=None):
+            ofile = os.path.join(self.temp_dir, f"out_{chunk}.gpkg")
+            pipeline = pylasr.multichm(
+                res=1.0, ws=1.0, min_height=2.0, dist_2d=8.0, dist_3d=1.0, ofile=ofile
+            )
+            if chunk:
+                pipeline.set_chunk(chunk)
+            result = pylasr.execute(pipeline, [las])
+            self.assertTrue(result["success"], result.get("message"))
+            return read_points(ofile)
+
+        self.assertEqual(len(run()), 1)
+        self.assertEqual(len(run(chunk=10.0)), 1)
+
+    def test_tie_handling_matches_reference(self):
+        """On a flat run of equal-height cells, ties must resolve the way
+        lidRplugins::multichm() does and not collapse to a single survivor"""
+        las = os.path.join(self.temp_dir, "tie.las")
+        x = [100.5 + i for i in range(13)] + [99.0, 115.0]
+        y = [100.5] * 13 + [99.0, 102.0]
+        z = [10.0] * 13 + [0.0, 0.0]
+        write_las(las, x, y, z)
+
+        ofile = os.path.join(self.temp_dir, "out_tie.gpkg")
+        pipeline = pylasr.multichm(res=1.0, ws=3.0, ofile=ofile)
+        result = pylasr.execute(pipeline, [las])
+        self.assertTrue(result["success"], result.get("message"))
+
+        points = sorted(read_points(ofile))
+        self.assertEqual([round(p[0], 1) for p in points], [100.5, 106.5, 112.5])
 
 
 if __name__ == "__main__":
