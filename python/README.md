@@ -138,6 +138,7 @@ pipeline = pylasr.reader_polygons(aoi="MULTIPOLYGON(((...)),((...)))") + pylasr.
 - `delete_noise()` - Remove noise points (convenience function)
 - `delete_ground()` - Remove ground points (convenience function)
 - `filter_with_grid()` - Grid-based point filtering
+- `keep_latest()` - Keep the most recent acquisition where several overlap
 
 ### Point Operations & Attributes
 - `edit_attribute()` - Modify point attribute values

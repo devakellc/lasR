@@ -15,6 +15,7 @@
 #include "info.h"
 #include "ipf.h"
 #include "ivf.h"
+#include "keeplatest.h"
 #include "loadmatrix.h"
 #include "loadraster.h"
 #include "localmaximum.h"
@@ -106,6 +107,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
     {"hulls",                create_instance<LASRboundaries>},
     {"info",                 create_instance<LASRinfo>},
     {"keep_attributes",      create_instance<LASRremoveattributes>},
+    {"keep_latest",          create_instance<LASRkeeplatest>},
     {"load_matrix",          create_instance<LASRloadmatrix>},
     {"load_raster",          create_instance<LASRloadraster>},
     {"local_maximum",        create_instance<LASRlocalmaximum>},
