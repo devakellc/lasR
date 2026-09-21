@@ -3,6 +3,7 @@
 Shared utility functions for tests
 """
 
+import csv
 import os
 import struct
 import subprocess
@@ -114,3 +115,15 @@ def read_raster_cells(path):
             cells.append((x, y, value))
 
     return cells
+
+
+def read_points(ofile):
+    """Read back the (x, y, z) of every feature a lasR vector stage wrote to ofile."""
+    csv_path = ofile + ".csv"
+    subprocess.run(
+        ["ogr2ogr", "-f", "CSV", csv_path, ofile, "-lco", "GEOMETRY=AS_XYZ"],
+        check=True, capture_output=True,
+    )
+
+    with open(csv_path, newline="") as f:
+        return [(float(row["X"]), float(row["Y"]), float(row["Z"])) for row in csv.DictReader(f)]

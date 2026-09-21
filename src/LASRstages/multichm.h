@@ -18,8 +18,7 @@ public:
   bool process(PointCloud*& las) override;
   bool write() override;
   void clear(bool last) override;
-  double need_buffer() const override { return MAX(ws, dist_3d); };
-  bool need_points() const override { return true; };
+  double need_buffer() const override { return MAX3(ws, dist_2d, dist_3d); };
   bool set_parameters(const nlohmann::json&) override;
   std::string get_name() const override { return "multichm"; };
   std::vector<PointLAS>& get_maxima() override { return lm; };

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
 
 // 95th percentile of the n first values of a sorted run. Same convention as MetricManager::percentile
 static float percentile95(const float* x, uint32_t n)
@@ -147,14 +148,27 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
   k.assign(ncells, 0);
   offset.assign(ncells+1, 0);
 
-  Point p;
-  p.set_schema(&las->header->schema);
+  // Decode and filter each point once; the scatter below reuses (cell, z) instead of
+  // calling get_point() and cell_from_xy() again
+  std::vector<int32_t> cell_of(las->npoints, -1);
+  std::vector<float> zval(las->npoints);
 
-  for (size_t i = 0 ; i < las->npoints ; i++)
+  #pragma omp parallel num_threads(ncpu)
   {
-    if (!las->get_point(i, &p, &pointfilter)) continue;
-    int cell = grid.cell_from_xy(p.get_x(), p.get_y());
-    if (cell >= 0) offset[cell+1]++;
+    Point p;
+    p.set_schema(&las->header->schema);
+
+    #pragma omp for
+    for (size_t i = 0 ; i < las->npoints ; i++)
+    {
+      if (!las->get_point(i, &p, &pointfilter)) continue;
+      int cell = grid.cell_from_xy(p.get_x(), p.get_y());
+      if (cell < 0) continue;
+      cell_of[i] = cell;
+      zval[i] = (float)p.get_z();
+      #pragma omp atomic
+      offset[cell+1]++;
+    }
   }
 
   for (int c = 0 ; c < ncells ; c++) offset[c+1] += offset[c];
@@ -164,9 +178,8 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
 
   for (size_t i = 0 ; i < las->npoints ; i++)
   {
-    if (!las->get_point(i, &p, &pointfilter)) continue;
-    int cell = grid.cell_from_xy(p.get_x(), p.get_y());
-    if (cell >= 0) z[cursor[cell]++] = (float)p.get_z();
+    int cell = cell_of[i];
+    if (cell >= 0) z[cursor[cell]++] = zval[i];
   }
 
   #pragma omp parallel for num_threads(ncpu)
@@ -228,14 +241,16 @@ float LASRmultichm::update_chm(bool peel, size_t& alive)
 }
 
 // Local maximum filter on the CHM. A cell that already gave a maximum is skipped. Its CHM only
-// decreases so the next ones would be duplicates
+// decreases so the next ones would be duplicates.
+// Sequential on purpose: a same-height neighbour only suppresses once it is itself confirmed
+// (has_lm), matching lidRplugins::multichm(); a naive parallel pass lets a rejected neighbour
+// suppress too and collapses a whole flat plateau to one point.
 void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
 {
   int ncols = grid.get_ncols();
   int nrows = grid.get_nrows();
   size_t n = active.size();
 
-  #pragma omp parallel for num_threads(ncpu)
   for (size_t a = 0 ; a < n ; a++)
   {
     int c = active[a];
@@ -257,27 +272,27 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
       int j = rr*ncols + cc;
       float u = chm[j];
 
-      // On a plateau the smallest cell index wins. The result does not depend on the traversal order
-      if (u != NA_F32_RASTER && (u > v || (u == v && j < c))) is_max = false;
+      if (u == NA_F32_RASTER) continue;
+      if (u > v || (u == v && has_lm[j])) is_max = false;
     }
 
     if (is_max)
     {
-      #pragma omp critical(multichm_maxima)
-      {
-        has_lm[c] = 1;
-        maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v});
-      }
+      has_lm[c] = 1;
+      maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v});
     }
   }
 }
 
 // Sort the candidates by decreasing height and keep those far enough from the trees already
-// retained. Ties are broken on the coordinates to get a reproducible order
+// retained. Ties are broken on the coordinates to get a reproducible order.
+// Retained trees are bucketed on a MAX(dist_2d, dist_3d) grid so a candidate only scans its
+// 3x3 neighbourhood instead of every tree kept so far.
 void LASRmultichm::select_trees(std::vector<Maximum>& maxima) const
 {
   double d2d = dist_2d*dist_2d;
   double d3d = dist_3d*dist_3d;
+  double cell = MAX(dist_2d, dist_3d);
 
   std::sort(maxima.begin(), maxima.end(), [](const Maximum& a, const Maximum& b)
   {
@@ -287,22 +302,46 @@ void LASRmultichm::select_trees(std::vector<Maximum>& maxima) const
   });
 
   std::vector<Maximum> trees;
+  std::unordered_map<uint64_t, std::vector<uint32_t>> buckets;
+
+  auto bucket_key = [cell](double x, double y) -> uint64_t
+  {
+    int32_t bx = (int32_t)std::floor(x/cell);
+    int32_t by = (int32_t)std::floor(y/cell);
+    return (((uint64_t)(uint32_t)bx) << 32) | (uint32_t)by;
+  };
 
   for (const auto& m : maxima)
   {
+    int32_t bx = (int32_t)std::floor(m.x/cell);
+    int32_t by = (int32_t)std::floor(m.y/cell);
     bool detected = true;
 
-    for (const auto& t : trees)
+    for (int dbx = -1 ; dbx <= 1 && detected ; dbx++)
     {
-      double dx = m.x - t.x;
-      double dy = m.y - t.y;
-      double dz = m.z - t.z;
-      double dd = dx*dx + dy*dy;
+      for (int dby = -1 ; dby <= 1 && detected ; dby++)
+      {
+        auto it = buckets.find((((uint64_t)(uint32_t)(bx+dbx)) << 32) | (uint32_t)(by+dby));
+        if (it == buckets.end()) continue;
 
-      if (dd < d2d || dd + dz*dz < d3d) { detected = false; break; }
+        for (uint32_t idx : it->second)
+        {
+          const Maximum& t = trees[idx];
+          double dx = m.x - t.x;
+          double dy = m.y - t.y;
+          double dz = m.z - t.z;
+          double dd = dx*dx + dy*dy;
+
+          if (dd < d2d || dd + dz*dz < d3d) { detected = false; break; }
+        }
+      }
     }
 
-    if (detected) trees.push_back(m);
+    if (detected)
+    {
+      buckets[bucket_key(m.x, m.y)].push_back((uint32_t)trees.size());
+      trees.push_back(m);
+    }
   }
 
   maxima.swap(trees);
@@ -361,4 +400,10 @@ bool LASRmultichm::write()
 void LASRmultichm::clear(bool last)
 {
   lm.clear();
+  std::vector<float>().swap(z);
+  std::vector<uint32_t>().swap(offset);
+  std::vector<uint32_t>().swap(k);
+  std::vector<float>().swap(chm);
+  std::vector<char>().swap(has_lm);
+  std::vector<int>().swap(active);
 }

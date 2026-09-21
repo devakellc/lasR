@@ -12,7 +12,7 @@ import unittest
 # Add the parent directory to sys.path to import pylasr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test_utils import read_raster_cells, write_las
+from test_utils import read_points, read_raster_cells, write_las
 
 try:
     import pylasr
@@ -323,6 +323,62 @@ class TestRandomWalker(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             pylasr.execute(pipeline, [self.las])
+
+
+class TestMultichm(unittest.TestCase):
+    """Regression tests for the multichm buffer size and tie-handling bugs"""
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_buffer_covers_dist_2d(self):
+        """A candidate near a chunk boundary must still see a taller tree suppressing it
+        across dist_2d, even though dist_2d exceeds both ws and dist_3d"""
+        las = os.path.join(self.temp_dir, "buffer.las")
+        write_las(
+            las,
+            [106.5, 112.5, 100.0, 120.0],
+            [105.5, 105.5, 100.0, 110.0],
+            [20.0, 10.0, 0.0, 0.0],
+        )
+
+        def run(chunk=None):
+            ofile = os.path.join(self.temp_dir, f"out_{chunk}.gpkg")
+            pipeline = pylasr.multichm(
+                res=1.0, ws=1.0, min_height=2.0, dist_2d=8.0, dist_3d=1.0, ofile=ofile
+            )
+            if chunk:
+                pipeline.set_chunk(chunk)
+            result = pylasr.execute(pipeline, [las])
+            self.assertTrue(result["success"], result.get("message"))
+            return read_points(ofile)
+
+        self.assertEqual(len(run()), 1)
+        self.assertEqual(len(run(chunk=10.0)), 1)
+
+    def test_tie_handling_matches_reference(self):
+        """On a flat run of equal-height cells, ties must resolve the way
+        lidRplugins::multichm() does and not collapse to a single survivor"""
+        las = os.path.join(self.temp_dir, "tie.las")
+        x = [100.5 + i for i in range(13)] + [99.0, 115.0]
+        y = [100.5] * 13 + [99.0, 102.0]
+        z = [10.0] * 13 + [0.0, 0.0]
+        write_las(las, x, y, z)
+
+        ofile = os.path.join(self.temp_dir, "out_tie.gpkg")
+        pipeline = pylasr.multichm(res=1.0, ws=3.0, ofile=ofile)
+        result = pylasr.execute(pipeline, [las])
+        self.assertTrue(result["success"], result.get("message"))
+
+        points = sorted(read_points(ofile))
+        self.assertEqual([round(p[0], 1) for p in points], [100.5, 106.5, 112.5])
 
 
 if __name__ == "__main__":
