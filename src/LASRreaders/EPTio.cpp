@@ -1,6 +1,7 @@
 #include "EPTio.h"
 #include "Header.h"
 #include "LASio.h"
+#include "Shape.h"
 #include "error.h"
 #include "print.h"
 
@@ -42,6 +43,7 @@ EPTio::EPTio()
   total_points = 0;
   current_tile = nullptr;
   points_read = 0;
+  aoi_buffer = 0;
 
   for (int i = 0; i < 6; i++)
   {
@@ -281,6 +283,7 @@ void EPTio::query(const std::string& endpoint,
 
   // Clear previous state
   tile_queue.clear();
+  queried_nodes.clear();
   total_points = 0;
   points_read = 0;
 
@@ -292,6 +295,7 @@ void EPTio::query(const std::string& endpoint,
   }
 
   // Traverse hierarchy with spatial filter (expand by buffer)
+  aoi_buffer = buffer;
   double qxmin = xmin - buffer;
   double qymin = ymin - buffer;
   double qxmax = xmax + buffer;
@@ -361,6 +365,10 @@ void EPTio::load_hierarchy_page(const EPTkey& page_key, double qxmin, double qym
     if (nxmax < qxmin || nxmin > qxmax || nymax < qymin || nymin > qymax)
       continue;
 
+    // Growing the node rather than the polygon keeps the buffer without offsetting the geometry
+    if (aoi != nullptr && !aoi->intersects(nxmin - aoi_buffer, nymin - aoi_buffer, nxmax + aoi_buffer, nymax + aoi_buffer))
+      continue;
+
     int point_count = value.get<int>();
 
     if (point_count > 0)
@@ -368,6 +376,7 @@ void EPTio::load_hierarchy_page(const EPTkey& page_key, double qxmin, double qym
       // Node has points — add to queue
       tile_queue.push_back(key);
       total_points += point_count;
+      queried_nodes.push_back({nxmin, nymin, nxmax, nymax, (size_t)point_count});
     }
     else if (point_count == -1)
     {
@@ -542,6 +551,7 @@ void EPTio::close()
   }
 
   tile_queue.clear();
+  queried_nodes.clear();
   opened = false;
   total_points = 0;
   points_read = 0;

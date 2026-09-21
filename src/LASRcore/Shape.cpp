@@ -544,13 +544,18 @@ bool PolygonShape::near_boundary(double x, double y, double distance) const
 bool PolygonShape::intersects(double xmin, double ymin, double xmax, double ymax) const
 {
   if (xmax < minx || xmin > maxx || ymax < miny || ymin > maxy) return false;
+  if (bands.empty()) return false;
 
   // A corner inside the shape covers a box swallowed by the polygon, an edge crossing the box covers
   // both a partial overlap and a polygon swallowed by the box. A box lying in a hole matches neither
   if (contains(xmin, ymin) || contains(xmax, ymin) || contains(xmin, ymax) || contains(xmax, ymax)) return true;
 
-  for (const auto& e : edges)
-    if (edge_crosses_box(e, xmin, ymin, xmax, ymax)) return true;
+  int first = band_of(ymin);
+  int last = band_of(ymax);
+
+  for (int b = first ; b <= last ; b++)
+    for (int i : bands[b])
+      if (edge_crosses_box(edges[i], xmin, ymin, xmax, ymax)) return true;
 
   return false;
 }

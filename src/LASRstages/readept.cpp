@@ -44,6 +44,7 @@ bool LASReptreader::set_chunk(Chunk& chunk)
       // reader so one does not silently drain the other's traversal.
       std::unique_ptr<EPTio>& eptio = ept_cache[std::to_string(i) + ":" + file];
       if (!eptio) eptio = std::unique_ptr<EPTio>(new EPTio());
+      eptio->set_aoi(chunk.aoi);
 
       // An endpoint already in the cache is already opened: query() only re-traverses
       // the hierarchy for the new extent, it does not re-parse ept.json or re-probe a tile
