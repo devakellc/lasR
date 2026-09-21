@@ -92,6 +92,10 @@ public:
   virtual bool is_parallelized() const { return false; };  // concurrent-points
   virtual bool use_rcapi() const { return false; };
   virtual double need_buffer() const { return 0; };
+
+  // Bytes held for a chunk, per point read and per m2 covered. Summed over the pipeline to size it
+  virtual double memory_per_point() const { return 0; };
+  virtual double memory_per_area() const { return 0; };
   virtual bool need_points() const { return true; };
   virtual void get_extent(double& xmin, double& ymin, double& xmax, double& ymax) { return; };
 
@@ -211,6 +215,8 @@ public:
   bool write() override;
   //void clear(bool last) override;
   const Raster& get_raster() { return raster; };
+
+  double memory_per_area() const override { return raster.get_xres() > 0 ? 4.0*raster.get_nbands()/(raster.get_xres()*raster.get_yres()) : 0; };
 
 protected:
   Raster raster;
