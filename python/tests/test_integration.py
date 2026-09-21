@@ -537,6 +537,42 @@ class TestAreaOfInterest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.npoints("POINT(0 0)")
 
+    def test_aoi_clips_ept_like_las(self):
+        """An EPT endpoint is clipped exactly like the LAS holding the same points"""
+        ept = None
+        for path in [
+            "../inst/extdata/ept-test-multi/ept.json",
+            "../../inst/extdata/ept-test-multi/ept.json",
+            "../../../inst/extdata/ept-test-multi/ept.json",
+        ]:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                ept = full_path
+                break
+
+        if not ept:
+            self.skipTest("EPT test endpoint not found")
+
+        concave = (
+            "POLYGON((273357 5274357, 273500 5274357, 273500 5274500, 273643 5274500, "
+            "273643 5274643, 273357 5274643, 273357 5274357))"
+        )
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            counts = []
+            for name, source in [("ept", ept), ("las", self.las)]:
+                written = os.path.join(temp_dir, f"aoi_{name}.las")
+                pipeline = pylasr.reader_polygons(aoi=concave) + pylasr.write_las(ofile=written)
+                self.assertTrue(pipeline.execute([source])["success"], "Pipeline execution failed")
+
+                pipeline = pylasr.reader_coverage() + pylasr.summarise()
+                counts.append(pipeline.execute([written])["data"][0]["summary"]["npoints"])
+
+            self.assertEqual(counts[0], counts[1])
+        finally:
+            shutil.rmtree(temp_dir)
+
     def test_island_in_a_hole_is_not_double_counted(self):
         """The island's box sits entirely inside the donut's box: a point there must be read once"""
         outer = self.ring(self.XMIN, self.YMIN, self.XMAX, self.YMAX)

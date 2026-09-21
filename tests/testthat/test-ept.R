@@ -68,3 +68,44 @@ test_that("Multiple EPT endpoints produce an error",
   ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
   expect_error(exec(reader() + summarise(), on = c(ept, ept)), "single EPT")
 })
+
+test_that("an area of interest prunes the EPT octree traversal",
+{
+  ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
+  las <- system.file("extdata", "Topography.las", package = "lasR")
+
+  aoi <- paste0("POLYGON((273357 5274357, 273500 5274357, 273500 5274500, 273643 5274500, ",
+                "273643 5274643, 273357 5274643, 273357 5274357))")
+
+  # the area of interest clips the EPT read exactly like the LAS read of the same data
+  ofile <- paste0(tempdir(), "/ept_aoi.las")
+  exec(reader(aoi = aoi) + write_las(ofile), on = ept)
+  from_ept <- exec(reader() + summarise(), on = ofile)
+
+  ofile2 <- paste0(tempdir(), "/las_aoi.las")
+  exec(reader(aoi = aoi) + write_las(ofile2), on = las)
+  from_las <- exec(reader() + summarise(), on = ofile2)
+
+  expect_equal(from_ept$npoints, from_las$npoints)
+  expect_equal(from_ept$npoints, 53153)
+
+  # The four depth 1 nodes split the cube at x = 273500 and y = 5274500. This area of interest
+  # excludes the south east node with a margin, so its 20250 points are never downloaded. The count
+  # differs from the LAS by two points sitting on the boundary: the EPT re-encoding quantizes the
+  # coordinates differently
+  aoi <- paste0("POLYGON((273357 5274357, 273480 5274357, 273480 5274520, 273643 5274520, ",
+                "273643 5274643, 273357 5274643, 273357 5274357))")
+
+  ofile3 <- paste0(tempdir(), "/ept_aoi_pruned.las")
+  exec(reader(aoi = aoi) + write_las(ofile3), on = ept)
+  pruned <- exec(reader() + summarise(), on = ofile3)
+  expect_equal(pruned$npoints, 46946)
+
+  # an area of interest inside the north east node alone
+  aoi <- "POLYGON((273560 5274560, 273620 5274560, 273620 5274620, 273560 5274620, 273560 5274560))"
+
+  ofile4 <- paste0(tempdir(), "/ept_aoi_one_node.las")
+  exec(reader(aoi = aoi) + write_las(ofile4), on = ept)
+  one_node <- exec(reader() + summarise(), on = ofile4)
+  expect_equal(one_node$npoints, 4474)
+})

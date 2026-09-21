@@ -1,6 +1,7 @@
 #include "EPTio.h"
 #include "Header.h"
 #include "LASio.h"
+#include "Shape.h"
 #include "error.h"
 #include "print.h"
 
@@ -42,6 +43,7 @@ EPTio::EPTio()
   total_points = 0;
   current_tile = nullptr;
   points_read = 0;
+  aoi_buffer = 0;
 
   for (int i = 0; i < 6; i++)
   {
@@ -293,6 +295,7 @@ void EPTio::query(const std::vector<std::string>& main_files,
   }
 
   // Traverse hierarchy with spatial filter (expand by buffer)
+  aoi_buffer = buffer;
   double qxmin = xmin - buffer;
   double qymin = ymin - buffer;
   double qxmax = xmax + buffer;
@@ -360,6 +363,10 @@ void EPTio::load_hierarchy_page(const EPTkey& page_key, double qxmin, double qym
 
     // 2D intersection test
     if (nxmax < qxmin || nxmin > qxmax || nymax < qymin || nymin > qymax)
+      continue;
+
+    // Growing the node rather than the polygon keeps the buffer without offsetting the geometry
+    if (aoi != nullptr && !aoi->intersects(nxmin - aoi_buffer, nymin - aoi_buffer, nxmax + aoi_buffer, nymax + aoi_buffer))
       continue;
 
     int point_count = value.get<int>();

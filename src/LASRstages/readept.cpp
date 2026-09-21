@@ -21,6 +21,7 @@ bool LASReptreader::set_chunk(Chunk& chunk)
   }
 
   eptio = new EPTio();
+  eptio->set_aoi(chunk.aoi);
 
   try
   {

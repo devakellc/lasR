@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <deque>
@@ -13,6 +14,7 @@
 
 class LASio;
 class Header;
+class PolygonShape;
 struct Point;
 
 class EPTio : public Fileio
@@ -45,6 +47,7 @@ public:
   int64_t p_count() override;
 
   void set_depth(int depth);
+  void set_aoi(const std::shared_ptr<const PolygonShape>& aoi) { this->aoi = aoi; };
 
   void query(const std::vector<std::string>& main_files,
              const std::vector<std::string>& neighbour_files,
@@ -68,6 +71,10 @@ private:
   // EPT metadata
   std::string base_path;
   std::string query_string;  // URL query params (e.g. ?token=...) for signed URLs
+
+  // Prunes the traversal, null when there is none, with the buffer the nodes are grown by
+  std::shared_ptr<const PolygonShape> aoi;
+  double aoi_buffer;
   bool remote;
   bool opened;
   nlohmann::json ept_metadata;
