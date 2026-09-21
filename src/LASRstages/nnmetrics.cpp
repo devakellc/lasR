@@ -1,5 +1,4 @@
 #include "nnmetrics.h"
-#include "localmaximum.h"
 #include "openmp.h"
 #include "error.h"
 
@@ -33,12 +32,12 @@ bool LASRnnmetrics::set_parameters(const nlohmann::json& stage)
 
 bool LASRnnmetrics::process(PointCloud*& las)
 {
-  // Get the maxima from the local maximum stage
+  // Get the maxima from the tree top stage
   auto it = connections.begin();
-  LASRlocalmaximum* lmx = dynamic_cast<LASRlocalmaximum*>(it->second);
+  StageMaxima* lmx = dynamic_cast<StageMaxima*>(it->second);
   if (lmx == nullptr)
   {
-    last_error = "invalid dynamic cast. Expecting a pointer to LASRlocalmaximum"; // # nocov
+    last_error = "invalid dynamic cast. Expecting a pointer to a tree top stage"; // # nocov
     return false; // # nocov
   }
   const auto& maxima = lmx->get_maxima();
@@ -136,10 +135,10 @@ bool LASRnnmetrics::connect(const std::list<std::unique_ptr<Stage>>& pipeline, c
 
   if (s == nullptr) return false;
 
-  LASRlocalmaximum* p = dynamic_cast<LASRlocalmaximum*>(s);
+  StageMaxima* p = dynamic_cast<StageMaxima*>(s);
 
   if (p)
-    set_connection(p);
+    set_connection(s);
   else
   {
     last_error = "Incompatible stage combination for 'neighborhood_metrics'"; // # nocov
