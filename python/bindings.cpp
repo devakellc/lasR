@@ -27,6 +27,75 @@ py::dict get_stage_info(api::Pipeline pipeline) {
     return info;
 }
 
+std::string coordinate_to_wkt(double value) {
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "%.17g", value);
+    return std::string(buffer);
+}
+
+std::string ring_to_wkt(const std::vector<std::vector<double>>& ring) {
+    std::string wkt = "(";
+    for (size_t i = 0; i < ring.size(); i++) {
+        if (ring[i].size() < 2)
+            throw std::invalid_argument("a vertex of the area of interest needs two coordinates");
+        if (i > 0) wkt += ", ";
+        wkt += coordinate_to_wkt(ring[i][0]) + " " + coordinate_to_wkt(ring[i][1]);
+    }
+    return wkt + ")";
+}
+
+std::string rings_to_wkt(const std::vector<std::vector<std::vector<double>>>& rings) {
+    std::string wkt = "(";
+    for (size_t i = 0; i < rings.size(); i++) {
+        if (i > 0) wkt += ", ";
+        wkt += ring_to_wkt(rings[i]);
+    }
+    return wkt + ")";
+}
+
+// How deep the nested sequences go. A ring of vertices is 2, the rings of a polygon 3, the polygons
+// of a multipolygon 4
+int nesting_depth(py::handle object) {
+    int depth = 0;
+    while (py::isinstance<py::sequence>(object) && !py::isinstance<py::str>(object)) {
+        py::sequence sequence = py::reinterpret_borrow<py::sequence>(object);
+        if (sequence.size() == 0) break;
+        depth++;
+        object = sequence[0];
+    }
+    return depth;
+}
+
+// The area of interest is accepted as WKT, as anything exposing a 'wkt' attribute such as a shapely
+// geometry, or as nested lists of coordinates: one level of rings for a polygon, two for a multipolygon
+std::string extract_aoi(py::object aoi) {
+    if (aoi.is_none()) return "";
+
+    try {
+        if (py::isinstance<py::str>(aoi)) return aoi.cast<std::string>();
+        if (py::hasattr(aoi, "wkt")) return aoi.attr("wkt").cast<std::string>();
+
+        int depth = nesting_depth(aoi);
+
+        if (depth == 3)
+            return "POLYGON" + rings_to_wkt(aoi.cast<std::vector<std::vector<std::vector<double>>>>());
+
+        if (depth == 4) {
+            auto polygons = aoi.cast<std::vector<std::vector<std::vector<std::vector<double>>>>>();
+            std::string wkt = "MULTIPOLYGON(";
+            for (size_t i = 0; i < polygons.size(); i++) {
+                if (i > 0) wkt += ", ";
+                wkt += rings_to_wkt(polygons[i]);
+            }
+            return wkt + ")";
+        }
+
+        throw std::invalid_argument("nested lists must be 3 levels deep for a polygon or 4 for a multipolygon, got " + std::to_string(depth));
+    } catch (const std::exception& e) {
+        throw py::value_error(std::string("aoi must be a WKT string, a geometry or nested lists of coordinates: ") + e.what());
+    }
+}
+
 std::string extract_uid(py::object connect_uid) {
     try {
         if (py::isinstance<api::Pipeline>(connect_uid)) {
@@ -347,6 +416,12 @@ PYBIND11_MODULE(pylasr, m) {
           py::arg("res"), py::arg("operation") = "min",
           py::arg("filter") = std::vector<std::string>{""});
 
+    m.def("keep_latest", &api::keep_latest,
+          "Keep the most recent acquisition where several overlap",
+          py::arg("res") = 5.0, py::arg("window") = 3600.0,
+          py::arg("use_attribute") = "gpstime",
+          py::arg("filter") = std::vector<std::string>{""});
+
     // Sampling
     m.def("sampling_voxel", &api::sampling_voxel,
           "Sample points using voxel-based approach",
@@ -426,6 +501,13 @@ PYBIND11_MODULE(pylasr, m) {
           py::arg("xmin"), py::arg("ymin"), py::arg("xmax"), py::arg("ymax"),
           py::arg("filter") = std::vector<std::string>{""}, py::arg("select") = "*", py::arg("depth") = -1);
 
+    m.def("reader_polygons", [](py::object aoi, std::vector<std::string> filter, std::string select, int depth) {
+        return api::reader_polygons(extract_aoi(aoi), filter, select, depth);
+    },
+          "Read points from polygonal areas. The bounding box of each polygon drives the chunking and the polygons clip the points.",
+          py::arg("aoi"),
+          py::arg("filter") = std::vector<std::string>{""}, py::arg("select") = "*", py::arg("depth") = -1);
+
     // Local maxima
     m.def("local_maximum", &api::local_maximum,
           "Find local maxima in point cloud",
@@ -441,6 +523,13 @@ PYBIND11_MODULE(pylasr, m) {
     "Find local maxima in raster",
     py::arg("connect_uid"), py::arg("ws"), py::arg("min_height") = 2.0,
     py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "");
+
+    m.def("multichm", &api::multichm,
+          "Individual tree detection on a multi CHM",
+          py::arg("res") = 1.0, py::arg("ws") = 3.0, py::arg("min_height") = 2.0,
+          py::arg("layer_thickness") = 0.5, py::arg("dist_2d") = 3.0, py::arg("dist_3d") = 5.0,
+          py::arg("use_max") = false,
+          py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "");
 
     m.def("callback", [](py::object fun, const std::string& expose, py::object args, bool drop_buffer, bool no_las_update) {
         if (!py::hasattr(fun, "__call__"))
@@ -504,7 +593,7 @@ PYBIND11_MODULE(pylasr, m) {
         std::string uid_seeds = extract_uid(connect_uid_seeds);
         return api::region_growing(uid_raster, uid_seeds, th_tree, th_seed, th_cr, max_cr, ofile);
     },
-    "Perform region growing segmentation",
+    "Perform region growing segmentation. Seeds accept any tree top stage: local_maximum, local_maximum_raster or multichm.",
     py::arg("connect_uid_raster"), py::arg("connect_uid_seeds"),
     py::arg("th_tree") = 2.0, py::arg("th_seed") = 0.45, py::arg("th_cr") = 0.55,
     py::arg("max_cr") = 20.0, py::arg("ofile") = "");
