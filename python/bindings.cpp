@@ -90,7 +90,7 @@ std::string extract_aoi(py::object aoi) {
             return wkt + ")";
         }
 
-        throw std::invalid_argument("nested lists must be " + std::to_string(depth) + " levels deep, expected 3 for a polygon or 4 for a multipolygon");
+        throw std::invalid_argument("nested lists must be 3 levels deep for a polygon or 4 for a multipolygon, got " + std::to_string(depth));
     } catch (const std::exception& e) {
         throw py::value_error(std::string("aoi must be a WKT string, a geometry or nested lists of coordinates: ") + e.what());
     }

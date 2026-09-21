@@ -400,3 +400,31 @@ class TestAreaOfInterest(unittest.TestCase):
             self.assertEqual(counts[0], counts[1])
         finally:
             shutil.rmtree(temp_dir)
+
+    def test_island_in_a_hole_is_not_double_counted(self):
+        """The island's box sits entirely inside the donut's box: a point there must be read once"""
+        outer = self.ring(self.XMIN, self.YMIN, self.XMAX, self.YMAX)
+        hole = self.ring(273437, 5274437, 273563, 5274563)
+        island = self.ring(273477, 5274477, 273523, 5274523)
+
+        donut_alone = self.npoints([outer, hole])
+        island_alone = self.npoints([island])
+        combined = self.npoints([[outer, hole], [island]])
+
+        self.assertEqual(combined, donut_alone + island_alone)
+
+    def test_island_in_a_hole_is_not_double_counted_when_chunked(self):
+        """The same disjoint-box check, but tiled: overlapping boxes tile into overlapping chunks too"""
+        outer = self.ring(self.XMIN, self.YMIN, self.XMAX, self.YMAX)
+        hole = self.ring(273437, 5274437, 273563, 5274563)
+        island = self.ring(273477, 5274477, 273523, 5274523)
+
+        donut_alone = self.npoints([outer, hole])
+        island_alone = self.npoints([island])
+
+        pipeline = pylasr.reader_polygons(aoi=[[outer, hole], [island]]) + pylasr.summarise()
+        pipeline.set_chunk(50)
+        result = pipeline.execute([self.las])
+        self.assertTrue(result["success"], "Pipeline execution failed")
+
+        self.assertEqual(result["data"][0]["summary"]["npoints"], donut_alone + island_alone)

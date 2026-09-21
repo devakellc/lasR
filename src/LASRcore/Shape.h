@@ -244,8 +244,8 @@ private:
 };
 
 
-// Bounding box of every part of a POLYGON or MULTIPOLYGON. Turns an area of interest into the
-// queries of a reader, one per part.
+// Bounding box of every part of a POLYGON or MULTIPOLYGON, split so the boxes never overlap each
+// other. Turns an area of interest into the queries of a reader, one or more per part.
 bool wkt_part_bboxes(const std::string& wkt, std::vector<double>& xmin, std::vector<double>& ymin, std::vector<double>& xmax, std::vector<double>& ymax, std::string& error);
 
 namespace std

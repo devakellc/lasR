@@ -1,5 +1,6 @@
 #include "Shape.h"
 
+#include <array>
 #include <utility>    // std::swap
 #include <functional> // std::hash
 #include <cmath>
@@ -622,6 +623,27 @@ PolygonShape* PolygonShape::from_wkt(const std::string& wkt, std::string& error)
   return shape;
 }
 
+// The pieces of 'r' outside 'clip': up to four axis-aligned rectangles, the left and right columns
+// spanning the full height and the top and bottom pieces spanning only the overlap's width
+static void subtract_rect(const std::array<double,4>& r, const std::array<double,4>& clip, std::vector<std::array<double,4>>& out)
+{
+  double oxmin = MAX(r[0], clip[0]);
+  double oymin = MAX(r[1], clip[1]);
+  double oxmax = MIN(r[2], clip[2]);
+  double oymax = MIN(r[3], clip[3]);
+
+  if (oxmin >= oxmax || oymin >= oymax)
+  {
+    out.push_back(r);
+    return;
+  }
+
+  if (oxmin > r[0]) out.push_back({r[0], r[1], oxmin, r[3]});
+  if (oxmax < r[2]) out.push_back({oxmax, r[1], r[2], r[3]});
+  if (oymin > r[1]) out.push_back({oxmin, r[1], oxmax, oymin});
+  if (oymax < r[3]) out.push_back({oxmin, oymax, oxmax, r[3]});
+}
+
 bool wkt_part_bboxes(const std::string& wkt, std::vector<double>& xmin, std::vector<double>& ymin, std::vector<double>& xmax, std::vector<double>& ymax, std::string& error)
 {
   OGRGeometry* geometry = nullptr;
@@ -656,16 +678,36 @@ bool wkt_part_bboxes(const std::string& wkt, std::vector<double>& xmin, std::vec
     return false;
   }
 
+  // Disjoint parts can still have overlapping boxes, e.g. an island inside another part's hole. A
+  // later box is split around every earlier one so each query owns disjoint ground and a point is
+  // read, and counted, by only one of them
+  std::vector<std::array<double,4>> claimed;
+
   for (const auto* part : parts)
   {
     if (part->IsEmpty()) continue;
 
     OGREnvelope envelope;
     part->getEnvelope(&envelope);
-    xmin.push_back(envelope.MinX);
-    ymin.push_back(envelope.MinY);
-    xmax.push_back(envelope.MaxX);
-    ymax.push_back(envelope.MaxY);
+    std::array<double,4> box = {envelope.MinX, envelope.MinY, envelope.MaxX, envelope.MaxY};
+
+    std::vector<std::array<double,4>> pieces = {box};
+    for (const auto& c : claimed)
+    {
+      std::vector<std::array<double,4>> next;
+      for (const auto& p : pieces) subtract_rect(p, c, next);
+      pieces = next;
+    }
+
+    for (const auto& p : pieces)
+    {
+      xmin.push_back(p[0]);
+      ymin.push_back(p[1]);
+      xmax.push_back(p[2]);
+      ymax.push_back(p[3]);
+    }
+
+    claimed.push_back(box);
   }
 
   OGRGeometryFactory::destroyGeometry(geometry);
