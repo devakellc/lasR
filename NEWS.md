@@ -17,7 +17,7 @@
 - Change: `drop_noise()` and `keep_noise()` now filter classes 7 and 18 instead of 18 only (#283)
 - New: record `use_attribute` as a field in `local_maximum()` output (#310)
 - New: operator `=` in `transform_with()` to assign a field (#314)
-- New: `transform_crs()` reprojects the point cloud to a target CRS (EPSG code or WKT). Unlike `set_crs()`, which only assigns a CRS, `transform_crs()` reprojects the X/Y coordinates with PROJ/GDAL, adapts the scale factors and offsets to the target CRS, updates the bounding box and tags downstream stages and writers with the target CRS. A collection of files that do not share a CRS is reprojected file by file, each from its own CRS, and the extents of the collection are expressed in the CRS of the first file.
+- New: `transform_crs()` reprojects the point cloud to a target CRS (EPSG code or WKT). Unlike `set_crs()`, which only assigns a CRS, `transform_crs()` reprojects the X/Y coordinates with PROJ/GDAL, adapts the scale factors and offsets to the target CRS, updates the bounding box and tags downstream stages and writers with the target CRS. A collection of files that do not share a CRS is reprojected file by file, each from its own CRS, and the extents of the collection are expressed in the CRS of the first file. A target that describes the heights, such as `"EPSG:32617+5703"` or `4979`, reprojects Z as well; a ballpark vertical transformation, which PROJ returns when a geoid grid is missing, is refused rather than silently leaving Z untouched.
 
 # lasR 0.20.1
 

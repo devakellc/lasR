@@ -18,6 +18,9 @@ public:
   bool is_meters() const;
   bool is_feets() const;
   bool is_geographic() const;
+  bool is_compound() const;
+  bool has_vertical() const;
+  int get_vertical_epsg() const;
   void dump() const;
   bool operator==(const CRS& other) const;
   std::string get_wkt() const;
@@ -38,5 +41,8 @@ private:
 // same pair of CRS should keep one and call the other overload instead.
 bool reproject_bbox(const CRS& source, const CRS& target, double& xmin, double& ymin, double& xmax, double& ymax);
 bool reproject_bbox(OGRCoordinateTransformation* ct, double& xmin, double& ymin, double& xmax, double& ymax);
+
+// Assemble a compound CRS. Returns an invalid CRS if an input is invalid or already compound.
+CRS make_compound(const CRS& horizontal, const CRS& vertical);
 
 #endif

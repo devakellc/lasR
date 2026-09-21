@@ -10,6 +10,7 @@
 LASRtransformcrs::LASRtransformcrs()
 {
   transform = nullptr;
+  transform_z = false;
   target_to_source_buffer_scale = 1.0;
   target_to_source_buffer_scale_valid = false;
 }
@@ -18,6 +19,7 @@ LASRtransformcrs::LASRtransformcrs(const LASRtransformcrs& other) : Stage(other)
 {
   source_crs = other.source_crs;
   target_crs = other.target_crs;
+  transform_z = other.transform_z;
   target_to_source_buffer_scale = other.target_to_source_buffer_scale;
   target_to_source_buffer_scale_valid = other.target_to_source_buffer_scale_valid;
   // OGRCoordinateTransformation is not thread-safe: each clone rebuilds its own
@@ -68,12 +70,54 @@ bool LASRtransformcrs::set_parameters(const nlohmann::json& stage)
 void LASRtransformcrs::set_crs(const CRS& crs)
 {
   source_crs = crs;
-  this->crs = target_crs; // downstream stages and writers see the target CRS
+  // downstream stages and writers see the target CRS
+  resolve_vertical();
+}
+
+// How a CRS describes Z: 0 not at all, > 0 the EPSG code of a vertical CRS, < 0 ellipsoidal,
+// as minus the code of the CRS itself so that two ellipsoidal CRS do not compare equal
+static int vertical_id(const CRS& crs)
+{
+  int epsg = crs.get_vertical_epsg();
+  if (epsg != 0) return epsg;
+  if (!crs.has_vertical()) return 0;
+  return (crs.get_epsg() > 0) ? -crs.get_epsg() : -1;
+}
+
+// A target that describes Z drives Z through the transformation. One that does not leaves Z
+// untouched and keeps the vertical CRS of the source, which still describes the heights.
+bool LASRtransformcrs::resolve_vertical()
+{
+  int source_vertical = vertical_id(source_crs);
+  int target_vertical = vertical_id(target_crs);
+
+  transform_z = (target_vertical != 0) && (target_vertical != source_vertical);
+
+  if (target_vertical != 0)
+  {
+    this->crs = target_crs;
+
+    if (source_vertical == 0 && source_crs.is_valid())
+    {
+      last_error = "transform_crs: the target describes the heights but the source does not. Assign the vertical CRS of the data with set_crs() so the heights are not shifted on a guess.";
+      return false;
+    }
+
+    return true;
+  }
+
+  int vertical_epsg = source_crs.get_vertical_epsg();
+  this->crs = (vertical_epsg != 0) ? make_compound(target_crs, CRS(vertical_epsg)) : target_crs;
+  if (!this->crs.is_valid()) this->crs = target_crs;
+
+  return true;
 }
 
 bool LASRtransformcrs::build_transform()
 {
   if (transform != nullptr) return true;
+
+  if (!resolve_vertical()) return false;
 
   if (!source_crs.is_valid())
   {
@@ -95,12 +139,26 @@ bool LASRtransformcrs::build_transform()
   oTargetSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
 
   CPLPushErrorHandler(CPLQuietErrorHandler);
-  transform = OGRCreateCoordinateTransformation(&oSourceSRS, &oTargetSRS);
+  if (transform_z)
+  {
+    // A ballpark vertical transformation leaves Z untouched and reports success. Refuse it
+    // rather than label unchanged heights with the target vertical CRS.
+    OGRCoordinateTransformationOptions options;
+    options.SetBallparkAllowed(false);
+    transform = OGRCreateCoordinateTransformation(&oSourceSRS, &oTargetSRS, options);
+  }
+  else
+  {
+    transform = OGRCreateCoordinateTransformation(&oSourceSRS, &oTargetSRS);
+  }
   CPLPopErrorHandler();
 
   if (transform == nullptr)
   {
-    last_error = "transform_crs: failed to create a coordinate transformation between the source and target CRS.";
+    if (transform_z)
+      last_error = "transform_crs: no vertical transformation is available between the source and target CRS. A geoid grid is likely missing, see https://cdn.proj.org";
+    else
+      last_error = "transform_crs: failed to create a coordinate transformation between the source and target CRS.";
     return false;
   }
 
@@ -161,6 +219,15 @@ bool LASRtransformcrs::set_chunk(Chunk& chunk)
       OGRCoordinateTransformation::DestroyCT(transform);
       transform = nullptr;
     }
+
+    const CRS previous = this->crs;
+    if (!resolve_vertical()) return false;
+
+    if (!(this->crs == previous))
+    {
+      last_error = "transform_crs: the files do not share a vertical CRS and the output cannot describe them all. Give the target a vertical CRS.";
+      return false;
+    }
   }
 
   if (source_crs.is_valid() && target_crs.is_valid())
@@ -201,7 +268,7 @@ bool LASRtransformcrs::set_chunk(Chunk& chunk)
   }
 
   // A later stage, including another transform_crs, must see the CRS this stage produces
-  if (target_crs.is_valid()) chunk.crs = target_crs;
+  if (target_crs.is_valid()) chunk.crs = this->crs.is_valid() ? this->crs : target_crs;
 
   return true;
 }
@@ -215,21 +282,23 @@ bool LASRtransformcrs::process(PointCloud*& las)
   AttributeSchema& schema = las->header->schema;
   Attribute& attr_x = schema.attributes[AttributeCore::X];
   Attribute& attr_y = schema.attributes[AttributeCore::Y];
+  Attribute& attr_z = schema.attributes[AttributeCore::Z];
 
   // get_x()/get_y() and the writers only decode INT32, FLOAT and DOUBLE; anything else reads as 0
   auto is_supported = [](AttributeType t)
   { return t == AttributeType::INT32 || t == AttributeType::FLOAT || t == AttributeType::DOUBLE; };
-  if (!is_supported(attr_x.type) || !is_supported(attr_y.type))
+  if (!is_supported(attr_x.type) || !is_supported(attr_y.type) || (transform_z && !is_supported(attr_z.type)))
   {
-    last_error = "transform_crs: unsupported X/Y storage type (expected int, float or double).";
+    last_error = "transform_crs: unsupported X/Y/Z storage type (expected int, float or double).";
     return false;
   }
 
   // LAS stores X/Y as scaled int32; PCD and other formats store them directly as float/double
   const bool x_int = (attr_x.type == AttributeType::INT32);
   const bool y_int = (attr_y.type == AttributeType::INT32);
+  const bool z_int = (attr_z.type == AttributeType::INT32);
 
-  // Z is preserved as-is, matching gdaltransform/sf/terra outside an explicit vertical CRS
+  // Z is reprojected only when the target describes the heights (transform_z), otherwise preserved as-is
 
   // A projected scale (e.g. 0.01 m) reused for a geographic target gives ~1 km resolution, and
   // a geographic scale (e.g. 1e-7 deg) reused for a projected target overflows the int32 range,
@@ -275,7 +344,7 @@ bool LASRtransformcrs::process(PointCloud*& las)
 
   // Batched: OGRCoordinateTransformation's per-call overhead makes arrays much faster
   const size_t BATCH = 65536;
-  std::vector<double> xs(BATCH), ys(BATCH);
+  std::vector<double> xs(BATCH), ys(BATCH), zs(BATCH);
   std::vector<unsigned char*> ptrs(BATCH);
   std::vector<int> ok(BATCH);
 
@@ -310,7 +379,7 @@ bool LASRtransformcrs::process(PointCloud*& las)
   auto flush = [&](size_t count)
   {
     if (count == 0) return;
-    transform->Transform((int)count, xs.data(), ys.data(), nullptr, ok.data());
+    transform->Transform((int)count, xs.data(), ys.data(), transform_z ? zs.data() : nullptr, ok.data());
     for (size_t i = 0; i < count; ++i)
     {
       p.data = ptrs[i];
@@ -323,13 +392,13 @@ bool LASRtransformcrs::process(PointCloud*& las)
       }
       bool ok_x = store(ptrs[i], attr_x, x_int, xs[i], new_sx, ox);
       bool ok_y = store(ptrs[i], attr_y, y_int, ys[i], new_sy, oy);
-      if (!ok_x || !ok_y)
+      bool ok_z = !transform_z || store(ptrs[i], attr_z, z_int, zs[i], attr_z.scale_factor, attr_z.value_offset);
+      if (!ok_x || !ok_y || !ok_z)
       {
         p.set_deleted();
         n_range++;
         continue;
       }
-      // Z is preserved: its raw value, scale and offset are left unchanged.
     }
   };
 
@@ -338,6 +407,7 @@ bool LASRtransformcrs::process(PointCloud*& las)
   {
     xs[n] = las->point.get_x();
     ys[n] = las->point.get_y();
+    if (transform_z) zs[n] = las->point.get_z();
     ptrs[n] = las->point.data;
     n++;
     if (n == BATCH) { flush(n); n = 0; }
@@ -363,7 +433,7 @@ bool LASRtransformcrs::process(PointCloud*& las)
     attr_y.value_offset = oy;
   }
 
-  las->header->crs = target_crs;
+  las->header->crs = this->crs;
 
   const size_t n_dropped = n_outside + n_range;
   if (n_dropped > 0) las->delete_deleted();

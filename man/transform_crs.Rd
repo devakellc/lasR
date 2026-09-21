@@ -18,9 +18,22 @@ between metres and degrees), the bounding box is updated and the target CRS is a
 the data and to all subsequent stages of the pipeline.
 }
 \details{
-Only the horizontal coordinates are reprojected: \strong{Z (elevation) is preserved unchanged},
-matching the behaviour of \code{gdaltransform}, \code{sf} and \code{terra} for 2D targets. Vertical datum
-transformations (compound/vertical CRS) are out of scope.
+When the target does not describe the heights, only the horizontal coordinates are
+reprojected: \strong{Z (elevation) is preserved unchanged}, matching the behaviour of
+\code{gdaltransform}, \code{sf} and \code{terra} for 2D targets. The vertical CRS of the source is carried
+over to the output, which then reads e.g. \code{WGS 84 / UTM zone 17N + NAVD88 height}: the
+heights are unchanged, so the vertical CRS that describes them is unchanged too.
+
+When the target does describe the heights -- a compound CRS such as \code{"EPSG:32617+5703"} or a
+3D CRS such as \code{4979} -- Z is reprojected as well, applying the geoid model that separates
+the two vertical datums. This requires the source to describe its own heights: assign them
+with \link{set_crs} if the files do not carry a vertical CRS, rather than have the stage
+guess and shift the heights by tens of metres.
+
+PROJ falls back to a \emph{ballpark} vertical transformation when the geoid grid it needs is not
+installed. Such a transformation leaves Z untouched and reports success, which would label
+heights with a vertical CRS that does not describe them, so it is refused instead. Missing
+grids can be obtained from \url{https://cdn.proj.org}.
 
 The source CRS is the CRS carried by the files being read or the one assigned with
 \link{set_crs} earlier in the pipeline. The stage therefore typically appears after the

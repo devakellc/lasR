@@ -301,3 +301,77 @@ test_that("a query spanning files of different CRS is refused",
   pipeline <- reader_rectangles(684700, 5017700, 685100, 5018100) + transform_crs(26917) + summarise()
   expect_error(exec(pipeline, on = c(utm, geo), noread = TRUE), "different CRS")
 })
+
+# The vertical tests below use EGM96 (EPSG:5773), whose grid ships with PROJ, and NAVD88
+# (EPSG:5703), whose grid does not. Ground truth from cs2cs: a point at 100 m EGM96 height in
+# the Megaplot area is at 64.501 m ellipsoidal height, a -35.5 m geoid undulation.
+
+test_that("transform_crs keeps the vertical CRS of the source when the target has none",
+{
+  f <- system.file("extdata", "Megaplot.las", package = "lasR")
+  src <- tempfile(fileext = ".las")
+  exec(reader_las() + set_crs("EPSG:26917+5703") + write_las(src), on = f, noread = TRUE)
+
+  out <- tempfile(fileext = ".las")
+  exec(reader_las() + transform_crs(32617) + write_las(out), on = src, noread = TRUE)
+
+  # The heights did not move, so the vertical CRS that describes them must not move either
+  expect_match(read_crs(out), "NAVD88")
+  expect_equal(read_range(out)[c("zmin", "zmax")], read_range(src)[c("zmin", "zmax")])
+})
+
+test_that("transform_crs reprojects Z through the geoid when the target describes the heights",
+{
+  f <- system.file("extdata", "Megaplot.las", package = "lasR")
+  src <- tempfile(fileext = ".las")
+  exec(reader_las() + set_crs("EPSG:26917+5773") + write_las(src), on = f, noread = TRUE)
+
+  # The EGM96 grid ships with PROJ but the machine running this may not have it, and the
+  # stage refuses a transformation it cannot do properly rather than leaving Z untouched
+  out <- tempfile(fileext = ".las")
+  res <- try(exec(reader_las() + transform_crs(4979) + write_las(out), on = src, noread = TRUE), silent = TRUE)
+  skip_if(inherits(res, "try-error"), "no vertical transformation available: the EGM96 grid is missing")
+
+  # cs2cs puts the undulation here at -35.5 m; the tolerance is absolute and in metres
+  before <- read_range(src)
+  after <- read_range(out)
+  expect_lt(abs(unname(after["zmin"] - before["zmin"]) + 35.5), 0.2)
+  expect_lt(abs(unname(after["zmax"] - before["zmax"]) + 35.5), 0.2)
+})
+
+test_that("transform_crs leaves Z alone when the vertical CRS does not change",
+{
+  f <- system.file("extdata", "Megaplot.las", package = "lasR")
+  src <- tempfile(fileext = ".las")
+  exec(reader_las() + set_crs("EPSG:26917+5703") + write_las(src), on = f, noread = TRUE)
+
+  out <- tempfile(fileext = ".las")
+  exec(reader_las() + transform_crs("EPSG:32617+5703") + write_las(out), on = src, noread = TRUE)
+
+  expect_equal(read_range(out)[c("zmin", "zmax")], read_range(src)[c("zmin", "zmax")])
+  expect_match(read_crs(out), "NAVD88")
+})
+
+test_that("transform_crs refuses to shift heights the source does not describe",
+{
+  f <- system.file("extdata", "Megaplot.las", package = "lasR")
+  out <- tempfile(fileext = ".las")
+
+  expect_error(exec(reader_las() + transform_crs("EPSG:32617+5703") + write_las(out), on = f, noread = TRUE),
+               "the source does not")
+})
+
+test_that("transform_crs refuses a ballpark vertical transformation",
+{
+  f <- system.file("extdata", "Megaplot.las", package = "lasR")
+  src <- tempfile(fileext = ".las")
+  exec(reader_las() + set_crs("EPSG:26917+5703") + write_las(src), on = f, noread = TRUE)
+
+  # Where the NAVD88 geoid grid is installed the transformation is not ballpark and rightly
+  # succeeds, so what the machine has decides which half of this is exercised
+  out <- tempfile(fileext = ".las")
+  res <- try(exec(reader_las() + transform_crs(4979) + write_las(out), on = src, noread = TRUE), silent = TRUE)
+  skip_if(!inherits(res, "try-error"), "the NAVD88 geoid grid is installed, the transformation is not ballpark")
+
+  expect_match(conditionMessage(attr(res, "condition")), "no vertical transformation")
+})

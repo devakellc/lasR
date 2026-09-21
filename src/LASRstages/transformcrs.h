@@ -30,10 +30,12 @@ public:
 
 private:
   bool build_transform();
+  bool resolve_vertical();
 
 private:
   CRS source_crs;
   CRS target_crs;
+  bool transform_z;
   OGRCoordinateTransformation* transform;
   double target_to_source_buffer_scale;
   bool target_to_source_buffer_scale_valid;
