@@ -52,6 +52,7 @@ Raster::Raster(const Raster& raster) : Grid(raster), GDALdataset()
   GDALdataset::set_raster(this->xmin, this->ymax, this->ncols, this->nrows, this->xres);
   buffer = raster.buffer;
   circular = raster.circular;
+  aoi = raster.aoi;
   set_nbands(raster.nBands);
   band_names = raster.band_names;
   nodata = raster.nodata;
@@ -254,6 +255,7 @@ void Raster::set_chunk(const Chunk& chunk)
 {
   buffer = std::ceil(chunk.buffer/xres); // buffer in pixel
   circular = chunk.shape == ShapeType::CIRCLE;
+  aoi = chunk.aoi;
 
   //print("Chunk %.1lf %.1lf %.1lf %.1lf (+%.1lf m)\n", chunk.xmin, chunk.xmax, chunk.ymin, chunk.ymax, chunk.buffer);
 
@@ -432,6 +434,25 @@ bool Raster::write()
   // Write the data to the raster band. If the raster is buffered we only write the main data
   // without the buffer
   CPLErr err;
+
+  // The area-of-interest mask does not depend on the band, so it is built once here instead of
+  // once per band inside the loop below
+  int ncols_no_buffer = ncols - 2*buffer;
+  int nrows_no_buffer = nrows - 2*buffer;
+  std::vector<bool> aoi_mask;
+  if (buffer != 0 && aoi != nullptr)
+  {
+    aoi_mask.resize((size_t)ncols_no_buffer*nrows_no_buffer);
+    for (int row = buffer ; row < nrows - buffer ; ++row)
+    {
+      for (int col = buffer ; col < ncols - buffer ; ++col)
+      {
+        size_t idx = (size_t)(row-buffer)*ncols_no_buffer + (col-buffer);
+        aoi_mask[idx] = aoi->contains(x_from_col(col), y_from_row(row));
+      }
+    }
+  }
+
   for (auto i = 1 ; i <= nBands ; ++i)
   {
     if (buffer == 0)
@@ -441,8 +462,6 @@ bool Raster::write()
     else
     {
       //printf("There is a buffer of size %d that need to be removed in the raster\n", buffer);
-      int ncols_no_buffer = ncols - 2*buffer;
-      int nrows_no_buffer = nrows - 2*buffer;
       float centerx = (float)ncols_no_buffer/2;
       float centery = (float)nrows_no_buffer/2;
       float chunk_width = (xmax-xmin)/xres - 2*buffer;
@@ -479,6 +498,10 @@ bool Raster::write()
             float distance = std::sqrt(dx*dx+dy*dy);
             if (distance > chunk_hwidth) val = NA_F32_RASTER;
           }
+
+          // Stripping the buffer only cuts a rectangular frame. The pixels the buffer points fed
+          // outside the area of interest are still there and must be discarded as well
+          if (aoi != nullptr && !aoi_mask[(size_t)new_row*ncols_no_buffer + new_col]) val = NA_F32_RASTER;
 
           data_no_buffer[modifiedIndex] = val;
         }

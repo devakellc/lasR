@@ -27,7 +27,8 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::covr, any::lidR
+          # lidR is archived from CRAN; test-lidR-compatibility.R skips itself without it
+          extra-packages: any::covr
           needs: coverage
 
       - name: Test coverage

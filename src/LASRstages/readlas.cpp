@@ -66,11 +66,14 @@ bool LASRlasreader::process(Point*& point)
   if (point == nullptr)
     point = new Point(&header->schema);
 
+  AOIposition position = AOI_INSIDE;
+
   do
   {
     if (lasio->read_point(point))
     {
-      if (point->inside_buffer(xmin, ymin, xmax, ymax, circular))
+      position = aoi_position(point->get_x(), point->get_y());
+      if (position != AOI_INSIDE || point->inside_buffer(xmin, ymin, xmax, ymax, circular))
         point->set_buffered();
     }
     else
@@ -79,7 +82,7 @@ bool LASRlasreader::process(Point*& point)
       delete point;
       point = nullptr;
     }
-  } while (point != nullptr && pointfilter.filter(point));
+  } while (point != nullptr && (pointfilter.filter(point) || position == AOI_OUTSIDE));
 
   return true;
 }
@@ -102,7 +105,11 @@ bool LASRlasreader::process(PointCloud*& las)
   {
     if (progress->interrupted()) break;
     if (pointfilter.filter(&p)) continue;
-    if (p.inside_buffer(xmin, ymin, xmax, ymax, circular)) p.set_buffered();
+
+    AOIposition position = aoi_position(p.get_x(), p.get_y());
+    if (position == AOI_OUTSIDE) continue;
+
+    if (position == AOI_BUFFER || p.inside_buffer(xmin, ymin, xmax, ymax, circular)) p.set_buffered();
     if (!las->add_point(p)) return false;
 
     progress->update(lasio->p_count());

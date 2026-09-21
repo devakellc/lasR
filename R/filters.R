@@ -143,6 +143,45 @@ resolve_depth <- function(depth, ...)
   return(depth)
 }
 
+resolve_aoi <- function(aoi)
+{
+  if (is.null(aoi)) return("")
+  if (is.character(aoi)) return(aoi)
+
+  if (inherits(aoi, c("sf", "sfc", "sfg")))
+  {
+    if (!requireNamespace("sf", quietly = TRUE))
+      stop("Package 'sf' is required to use an sf object as an area of interest")
+
+    geometry <- if (inherits(aoi, "sf")) sf::st_geometry(aoi) else aoi
+    return(sf::st_as_text(sf::st_union(geometry)))
+  }
+
+  if (is.matrix(aoi) || is.data.frame(aoi)) aoi <- list(aoi)
+
+  if (!is.list(aoi))
+    stop("'aoi' must be a WKT string, an sf object or a list of coordinate rings")
+
+  # A list of rings is a polygon, a list of such lists is a multipolygon. A data.frame is a list too
+  # and is a ring, not a list of them
+  if (is.list(aoi[[1]]) && !is.data.frame(aoi[[1]]))
+    return(paste0("MULTIPOLYGON(", paste(sapply(aoi, rings_to_wkt), collapse = ", "), ")"))
+
+  return(paste0("POLYGON", rings_to_wkt(aoi)))
+}
+
+rings_to_wkt <- function(rings)
+{
+  wkt <- sapply(rings, function(ring)
+  {
+    ring <- as.matrix(ring)
+    if (ncol(ring) < 2) stop("A vertex of the area of interest needs two coordinates")
+    paste0("(", paste(ring[,1], ring[,2], collapse = ", "), ")")
+  })
+
+  return(paste0("(", paste(wkt, collapse = ", "), ")"))
+}
+
 validate_filter <- function(condition, allow_laslib_filter)
 {
   if (length(condition) == 0L) return(condition)

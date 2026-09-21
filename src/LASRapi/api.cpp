@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "api.h"
+#include "Shape.h"
 
 namespace api
 {
@@ -202,6 +203,17 @@ Pipeline info()
   return Pipeline(s);
 }
 
+Pipeline keep_latest(double res, double window, std::string use_attribute, std::vector<std::string> filter)
+{
+  Stage s("keep_latest");
+  s.set("res", res);
+  s.set("window", window);
+  s.set("use_attribute", use_attribute);
+  s.set("filter", filter);
+
+  return Pipeline(s);
+}
+
 Pipeline load_raster(std::string file, int band)
 {
   Stage s("load_raster");
@@ -245,6 +257,23 @@ Pipeline local_maximum_raster(std::string connect_uid, double ws, double min_hei
   s.set("connect", connect_uid);
   s.set("ws", ws);
   s.set("min_height", min_height);
+  s.set("filter", filter);
+  s.set("output", ofile);
+  s.set_vector();
+
+  return Pipeline(s);
+}
+
+Pipeline multichm(double res, double ws, double min_height, double layer_thickness, double dist_2d, double dist_3d, bool use_max, std::vector<std::string> filter, std::string ofile)
+{
+  Stage s("multichm");
+  s.set("res", res);
+  s.set("ws", ws);
+  s.set("min_height", min_height);
+  s.set("layer_thickness", layer_thickness);
+  s.set("dist_2d", dist_2d);
+  s.set("dist_3d", dist_3d);
+  s.set("use_max", use_max);
   s.set("filter", filter);
   s.set("output", ofile);
   s.set_vector();
@@ -350,6 +379,32 @@ Pipeline reader_rectangles(std::vector<double> xmin, std::vector<double> ymin, s
   s.set("xmax", xmax);
   s.set("ymin", ymin);
   s.set("ymax", ymax);
+
+  return Pipeline(s);
+}
+
+Pipeline reader_polygons(std::string aoi, std::vector<std::string> filter, std::string select, int depth)
+{
+  if (aoi.empty())
+    throw std::invalid_argument("an area of interest is required");
+
+  // The area of interest does not drive the chunking. Query the bounding box of each of its parts
+  // so the chunks match the polygons, and let the area of interest clip them.
+  std::vector<double> xmin, ymin, xmax, ymax;
+  std::string error;
+  if (!wkt_part_bboxes(aoi, xmin, ymin, xmax, ymax, error))
+    throw std::invalid_argument(error);
+
+  if (depth >= 0)
+    filter.push_back("-depth " + std::to_string(depth));
+
+  Stage s("reader");
+  s.set("filter", filter);
+  s.set("xmin", xmin);
+  s.set("xmax", xmax);
+  s.set("ymin", ymin);
+  s.set("ymax", ymax);
+  s.set("aoi", aoi);
 
   return Pipeline(s);
 }
