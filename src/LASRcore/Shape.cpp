@@ -1,8 +1,12 @@
 #include "Shape.h"
 
+#include <array>
 #include <utility>    // std::swap
 #include <functional> // std::hash
 #include <cmath>
+#include <limits>
+
+#include <ogr_geometry.h>
 
 /* ====================
  * POINT
@@ -381,5 +385,333 @@ bool PolygonXY::contains(const PolygonXY& other) const
   {
     if (!contains(pt)) return false;
   }
+  return true;
+}
+
+/* ====================
+ * POLYGON SHAPE
+ * ====================*/
+
+// Liang-Barsky clipping: the edge meets the box when the parametric ranges of the two slabs overlap
+static bool edge_crosses_box(const Edge& e, double xmin, double ymin, double xmax, double ymax)
+{
+  double dx = e.B.x - e.A.x;
+  double dy = e.B.y - e.A.y;
+  double p[4] = {-dx, dx, -dy, dy};
+  double q[4] = {e.A.x-xmin, xmax-e.A.x, e.A.y-ymin, ymax-e.A.y};
+  double t0 = 0;
+  double t1 = 1;
+
+  for (int i = 0 ; i < 4 ; i++)
+  {
+    if (p[i] == 0)
+    {
+      if (q[i] < 0) return false;
+      continue;
+    }
+
+    double t = q[i]/p[i];
+
+    if (p[i] < 0)
+    {
+      if (t > t1) return false;
+      if (t > t0) t0 = t;
+    }
+    else
+    {
+      if (t < t0) return false;
+      if (t < t1) t1 = t;
+    }
+  }
+
+  return true;
+}
+
+PolygonShape::PolygonShape()
+{
+  band_height = 0;
+  minx = std::numeric_limits<double>::max();
+  miny = std::numeric_limits<double>::max();
+  maxx = std::numeric_limits<double>::lowest();
+  maxy = std::numeric_limits<double>::lowest();
+}
+
+void PolygonShape::add_ring(const PolygonXY& ring)
+{
+  size_t n = ring.coordinates.size();
+  if (n < 3) return;
+
+  for (size_t i = 0, j = n-1 ; i < n ; j = i++)
+  {
+    const PointXY& A = ring.coordinates[j];
+    const PointXY& B = ring.coordinates[i];
+
+    minx = MIN(minx, B.x);
+    miny = MIN(miny, B.y);
+    maxx = MAX(maxx, B.x);
+    maxy = MAX(maxy, B.y);
+
+    // A closed ring repeats its first vertex. The resulting edge has no length and would divide by
+    // zero when measuring a distance
+    if (A.x == B.x && A.y == B.y) continue;
+
+    edges.push_back(Edge(A, B));
+  }
+}
+
+void PolygonShape::build()
+{
+  bands.clear();
+  if (edges.empty()) return;
+
+  // A few edges per band: enough to shorten the ray casting without inflating the index when a
+  // single edge spans the whole height
+  int nbands = MAX(1, MIN(512, (int)edges.size()/2));
+  band_height = (maxy > miny) ? (maxy-miny)/nbands : 0;
+  if (band_height == 0) nbands = 1;
+
+  bands.resize(nbands);
+  for (size_t i = 0 ; i < edges.size() ; i++)
+  {
+    int first = band_of(edges[i].ymin());
+    int last = band_of(edges[i].ymax());
+    for (int b = first ; b <= last ; b++) bands[b].push_back((int)i);
+  }
+}
+
+int PolygonShape::band_of(double y) const
+{
+  if (band_height == 0) return 0;
+  int b = (int)((y-miny)/band_height);
+  if (b < 0) b = 0;
+  if (b >= (int)bands.size()) b = (int)bands.size()-1;
+  return b;
+}
+
+double PolygonShape::square_distance_to_edge(const Edge& e, double x, double y)
+{
+  double dx = e.B.x - e.A.x;
+  double dy = e.B.y - e.A.y;
+  double t = ((x-e.A.x)*dx + (y-e.A.y)*dy) / (dx*dx + dy*dy);
+
+  if (t < 0) t = 0;
+  if (t > 1) t = 1;
+
+  double px = e.A.x + t*dx - x;
+  double py = e.A.y + t*dy - y;
+  return px*px + py*py;
+}
+
+bool PolygonShape::contains(double x, double y) const
+{
+  if (x < minx || x > maxx || y < miny || y > maxy) return false;
+  if (bands.empty()) return false;
+
+  bool inside = false;
+  for (int i : bands[band_of(y)])
+  {
+    const PointXY& A = edges[i].A;
+    const PointXY& B = edges[i].B;
+
+    if ((A.y > y) != (B.y > y))
+    {
+      double xintersect = A.x + (y-A.y)*(B.x-A.x)/(B.y-A.y);
+      if (x < xintersect) inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+// Distance to the boundary only. Containment is a separate question, asked first by the callers so
+// that the scan below runs on the few points falling outside
+bool PolygonShape::near_boundary(double x, double y, double distance) const
+{
+  if (bands.empty()) return false;
+  if (x < minx-distance || x > maxx+distance || y < miny-distance || y > maxy+distance) return false;
+
+  double square_distance = distance*distance;
+  int first = band_of(y-distance);
+  int last = band_of(y+distance);
+
+  for (int b = first ; b <= last ; b++)
+    for (int i : bands[b])
+      if (square_distance_to_edge(edges[i], x, y) <= square_distance) return true;
+
+  return false;
+}
+
+bool PolygonShape::intersects(double xmin, double ymin, double xmax, double ymax) const
+{
+  if (xmax < minx || xmin > maxx || ymax < miny || ymin > maxy) return false;
+
+  // A corner inside the shape covers a box swallowed by the polygon, an edge crossing the box covers
+  // both a partial overlap and a polygon swallowed by the box. A box lying in a hole matches neither
+  if (contains(xmin, ymin) || contains(xmax, ymin) || contains(xmin, ymax) || contains(xmax, ymax)) return true;
+
+  for (const auto& e : edges)
+    if (edge_crosses_box(e, xmin, ymin, xmax, ymax)) return true;
+
+  return false;
+}
+
+PolygonShape* PolygonShape::from_wkt(const std::string& wkt, std::string& error)
+{
+  OGRGeometry* geometry = nullptr;
+  const char* text = wkt.c_str();
+
+  if (OGRGeometryFactory::createFromWkt(&text, nullptr, &geometry) != OGRERR_NONE || geometry == nullptr)
+  {
+    error = "cannot parse the geometry '" + wkt + "'";
+    return nullptr;
+  }
+
+  std::vector<OGRPolygon*> polygons;
+  OGRwkbGeometryType type = wkbFlatten(geometry->getGeometryType());
+
+  if (type == wkbPolygon)
+  {
+    polygons.push_back(geometry->toPolygon());
+  }
+  else if (type == wkbMultiPolygon)
+  {
+    OGRMultiPolygon* multi = geometry->toMultiPolygon();
+    for (int i = 0 ; i < multi->getNumGeometries() ; i++)
+    {
+      OGRGeometry* part = multi->getGeometryRef(i);
+      if (wkbFlatten(part->getGeometryType()) == wkbPolygon) polygons.push_back(part->toPolygon());
+    }
+  }
+  else
+  {
+    error = "the geometry must be a POLYGON or a MULTIPOLYGON";
+    OGRGeometryFactory::destroyGeometry(geometry);
+    return nullptr;
+  }
+
+  PolygonShape* shape = new PolygonShape;
+
+  for (const auto* polygon : polygons)
+  {
+    for (int i = -1 ; i < polygon->getNumInteriorRings() ; i++)
+    {
+      const OGRLinearRing* ring = (i < 0) ? polygon->getExteriorRing() : polygon->getInteriorRing(i);
+      if (ring == nullptr) continue;
+
+      PolygonXY coordinates;
+      for (int j = 0 ; j < ring->getNumPoints() ; j++) coordinates.push_back(PointXY(ring->getX(j), ring->getY(j)));
+      shape->add_ring(coordinates);
+    }
+  }
+
+  OGRGeometryFactory::destroyGeometry(geometry);
+
+  if (shape->edges.empty())
+  {
+    error = "the geometry has no ring";
+    delete shape;
+    return nullptr;
+  }
+
+  shape->build();
+
+  return shape;
+}
+
+// The pieces of 'r' outside 'clip': up to four axis-aligned rectangles, the left and right columns
+// spanning the full height and the top and bottom pieces spanning only the overlap's width
+static void subtract_rect(const std::array<double,4>& r, const std::array<double,4>& clip, std::vector<std::array<double,4>>& out)
+{
+  double oxmin = MAX(r[0], clip[0]);
+  double oymin = MAX(r[1], clip[1]);
+  double oxmax = MIN(r[2], clip[2]);
+  double oymax = MIN(r[3], clip[3]);
+
+  if (oxmin >= oxmax || oymin >= oymax)
+  {
+    out.push_back(r);
+    return;
+  }
+
+  if (oxmin > r[0]) out.push_back({r[0], r[1], oxmin, r[3]});
+  if (oxmax < r[2]) out.push_back({oxmax, r[1], r[2], r[3]});
+  if (oymin > r[1]) out.push_back({oxmin, r[1], oxmax, oymin});
+  if (oymax < r[3]) out.push_back({oxmin, oymax, oxmax, r[3]});
+}
+
+bool wkt_part_bboxes(const std::string& wkt, std::vector<double>& xmin, std::vector<double>& ymin, std::vector<double>& xmax, std::vector<double>& ymax, std::string& error)
+{
+  OGRGeometry* geometry = nullptr;
+  const char* text = wkt.c_str();
+
+  if (OGRGeometryFactory::createFromWkt(&text, nullptr, &geometry) != OGRERR_NONE || geometry == nullptr)
+  {
+    error = "cannot parse the geometry '" + wkt + "'";
+    return false;
+  }
+
+  std::vector<OGRGeometry*> parts;
+  OGRwkbGeometryType type = wkbFlatten(geometry->getGeometryType());
+
+  if (type == wkbPolygon)
+  {
+    parts.push_back(geometry);
+  }
+  else if (type == wkbMultiPolygon)
+  {
+    OGRMultiPolygon* multi = geometry->toMultiPolygon();
+    for (int i = 0 ; i < multi->getNumGeometries() ; i++)
+    {
+      OGRGeometry* part = multi->getGeometryRef(i);
+      if (wkbFlatten(part->getGeometryType()) == wkbPolygon) parts.push_back(part);
+    }
+  }
+  else
+  {
+    error = "the geometry must be a POLYGON or a MULTIPOLYGON";
+    OGRGeometryFactory::destroyGeometry(geometry);
+    return false;
+  }
+
+  // Disjoint parts can still have overlapping boxes, e.g. an island inside another part's hole. A
+  // later box is split around every earlier one so each query owns disjoint ground and a point is
+  // read, and counted, by only one of them
+  std::vector<std::array<double,4>> claimed;
+
+  for (const auto* part : parts)
+  {
+    if (part->IsEmpty()) continue;
+
+    OGREnvelope envelope;
+    part->getEnvelope(&envelope);
+    std::array<double,4> box = {envelope.MinX, envelope.MinY, envelope.MaxX, envelope.MaxY};
+
+    std::vector<std::array<double,4>> pieces = {box};
+    for (const auto& c : claimed)
+    {
+      std::vector<std::array<double,4>> next;
+      for (const auto& p : pieces) subtract_rect(p, c, next);
+      pieces = next;
+    }
+
+    for (const auto& p : pieces)
+    {
+      xmin.push_back(p[0]);
+      ymin.push_back(p[1]);
+      xmax.push_back(p[2]);
+      ymax.push_back(p[3]);
+    }
+
+    claimed.push_back(box);
+  }
+
+  OGRGeometryFactory::destroyGeometry(geometry);
+
+  if (xmin.empty())
+  {
+    error = "the geometry has no polygon";
+    return false;
+  }
+
   return true;
 }

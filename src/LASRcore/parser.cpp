@@ -15,9 +15,11 @@
 #include "info.h"
 #include "ipf.h"
 #include "ivf.h"
+#include "keeplatest.h"
 #include "loadmatrix.h"
 #include "loadraster.h"
 #include "localmaximum.h"
+#include "multichm.h"
 #include "nnmetrics.h"
 #include "nothing.h"
 #include "ptd.h"
@@ -105,9 +107,11 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
     {"hulls",                create_instance<LASRboundaries>},
     {"info",                 create_instance<LASRinfo>},
     {"keep_attributes",      create_instance<LASRremoveattributes>},
+    {"keep_latest",          create_instance<LASRkeeplatest>},
     {"load_matrix",          create_instance<LASRloadmatrix>},
     {"load_raster",          create_instance<LASRloadraster>},
     {"local_maximum",        create_instance<LASRlocalmaximum>},
+    {"multichm",             create_instance<LASRmultichm>},
     {"neighborhood_metrics", create_instance<LASRnnmetrics>},
     {"nothing",              create_instance<LASRnothing>},
     {"pit_fill",             create_instance<LASRpitfill>},
@@ -308,6 +312,27 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
             {
               last_error = "Invalid catalog";
               return false;
+            }
+          }
+
+          // The area of interest does not chunk the collection, it clips every chunk. Narrowing the
+          // extent to it sizes the outputs on the region that is actually processed
+          if (stage.contains("aoi"))
+          {
+            std::string wkt = stage.at("aoi");
+
+            if (!wkt.empty())
+            {
+              if (!catalog->set_aoi(wkt)) return false;
+
+              const PolygonShape* shape = catalog->get_aoi();
+              if (shape->intersects(xmin, ymin, xmax, ymax))
+              {
+                xmin = MAX(xmin, shape->xmin());
+                ymin = MAX(ymin, shape->ymin());
+                xmax = MIN(xmax, shape->xmax());
+                ymax = MIN(ymax, shape->ymax());
+              }
             }
           }
 

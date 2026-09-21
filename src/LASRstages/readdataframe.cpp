@@ -325,12 +325,15 @@ bool LASRdataframereader::process(Point*& point)
 
     if (!pointfilter.filter(point))
     {
+      AOIposition position = aoi_position(point->get_x(), point->get_y());
+      if (position == AOI_OUTSIDE) continue;
+      if (position == AOI_BUFFER) point->set_buffered();
       return true;
     }
   }
 
   // The last point
-  if (current_point == npoints && pointfilter.filter(point))
+  if (current_point == npoints && (pointfilter.filter(point) || aoi_position(point->get_x(), point->get_y()) == AOI_OUTSIDE))
   {
     delete point;
     point = nullptr;

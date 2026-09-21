@@ -28,6 +28,7 @@ private:
   int writetype;
   int dupfid;
   double extent[4];
+  std::shared_ptr<const PolygonShape> aoi;
   std::vector<Field> fields;
 };
 

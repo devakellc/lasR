@@ -30,6 +30,7 @@ Stage::Stage(const Stage& other)
   xmax = other.xmax;
   ymax = other.ymax;
   circular = other.circular;
+  aoi = other.aoi;
   verbose = other.verbose;
   ifile = other.ifile;
   uid = other.uid;
@@ -54,6 +55,7 @@ bool Stage::set_chunk(Chunk& chunk)
 {
   set_chunk(chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax);
   if (chunk.shape == ShapeType::CIRCLE) circular = true;
+  aoi = chunk.aoi;
   buffer = chunk.buffer;
   return true;
 }

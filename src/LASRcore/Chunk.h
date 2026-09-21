@@ -2,6 +2,7 @@
 #define CHUNK_H
 
 #include "Shape.h"
+#include <memory>
 #include <string>
 
 struct Chunk
@@ -24,6 +25,7 @@ struct Chunk
     ymax = 0;
     id = 0;
     shape = ShapeType::UNKNOWN;
+    aoi = nullptr;
     buffer = 0;
     process = true;
     name.clear();
@@ -52,6 +54,7 @@ struct Chunk
   bool process;
   int id;
   ShapeType shape;
+  std::shared_ptr<const PolygonShape> aoi; // area of interest clipping the chunk, null when there is none
   std::string name;
   std::vector<std::string> main_files;
   std::vector<std::string> neighbour_files;
