@@ -49,8 +49,7 @@ public:
   void set_depth(int depth);
   void set_aoi(const std::shared_ptr<const PolygonShape>& aoi) { this->aoi = aoi; };
 
-  void query(const std::vector<std::string>& main_files,
-             const std::vector<std::string>& neighbour_files,
+  void query(const std::string& endpoint,
              double xmin, double ymin, double xmax, double ymax,
              double buffer, bool circle,
              std::vector<std::string> filters);
