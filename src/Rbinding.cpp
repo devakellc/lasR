@@ -66,6 +66,7 @@ RCPP_MODULE(stages)
   function("hull", &api::hull, "Compute hull of a point cloud");
   function("hull_triangulation", &api::hull_triangulation, "Compute hull of a triangulation");
   function("info", &api::info, "Filter points with a grid layout");
+  function("keep_latest", &api::keep_latest, "Keep the most recent acquisition where several overlap");
   function("load_raster", &api::load_raster, "Load a raster from file");
   function("load_matrix", &api::load_matrix, "Load a 4x4 matrix");
   function("local_maximum", &api::local_maximum, "Local maximum filter on a point cloud");
@@ -80,6 +81,7 @@ RCPP_MODULE(stages)
   function("reader_coverage", &api::reader_coverage, "Read points coverage");
   function("reader_circles", &api::reader_circles, "Read points within circles");
   function("reader_rectangles", &api::reader_rectangles, "Read points within rectangles");
+  function("reader_polygons", &api::reader_polygons, "Read points within polygons");
   function("region_growing", &api::region_growing, "Region growing segmentation tree segmentation");
   function("remove_attribute", &api::remove_attribute, "Remove a named attribute from the point cloud");
   function("remove_attributes", &api::remove_attributes, "Remove named attributes from the point cloud");

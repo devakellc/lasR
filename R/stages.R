@@ -583,6 +583,34 @@ info = function(f)
 #' @rdname add_attribute
 keep_attributes = function(names){ .APISTAGES$keep_attributes(names) }
 
+#' Keep the most recent acquisition
+#'
+#' Where several acquisitions cover the same ground, keep the points of the most recent one. The
+#' area is gridded at `res` and, in each cell, a point older than the latest value of
+#' `use_attribute` by more than `window` is deleted, so an older acquisition is kept where it is
+#' the only cover.
+#'
+#' The acquisitions must reach the same chunk to be compared, which is the case for a query —
+#' \link{reader_polygons} or \link{reader_rectangles}. Reading a collection file by file gives
+#' each file its own chunk and there is nothing to resolve.
+#'
+#' @param res numeric. Size of the cells in which the acquisitions are compared. A large cell is
+#' won entirely by the most recent acquisition, so it trims the older one along the seam.
+#' @param window numeric. How far behind the latest value of a cell a point may be and still
+#' count as the same acquisition. In seconds for `gpstime`. Must be strictly positive and longer
+#' than a single acquisition takes to fly.
+#' @param use_attribute character. Attribute that orders the acquisitions.
+#' @template param-filter
+#' @examples
+#' \dontrun{
+#' # two overlapping acquisitions, the newer one wins in the overlap
+#' pipeline <- reader_polygons(aoi) + keep_latest(res = 5) + rasterize(1, "max")
+#' ans <- exec(pipeline, on = c(old, new))
+#' }
+#' @export
+#' @md
+keep_latest = function(res = 5, window = 3600, use_attribute = "gpstime", filter = "") { .APISTAGES$keep_latest(res, window, use_attribute, filter) }
+
 # ===== L =====
 
 #' Load a raster for later use
@@ -1048,7 +1076,8 @@ rasterize = function(res, operators = "max", filter = "", ofile = temptif(), ...
 #' nothing if it is not associated to another processing stage.
 #' It only initializes the pipeline. `reader()` is the main function that dispatches into to other
 #' functions. `reader_coverage()` processes the entire point cloud. `reader_circles()` and
-#' `reader_rectangles()` read and process only some selected regions of interest. If the chosen
+#' `reader_rectangles()` read and process only some selected regions of interest. `reader_polygons()`
+#' does the same with arbitrary polygons instead of rectangles. If the chosen
 #' reader has no options i.e. using `reader()` it can be omitted.
 #'
 #' Supported input formats: LAS, LAZ, COPC, PCD, and EPT (Entwine Point Tiles).
@@ -1059,6 +1088,12 @@ rasterize = function(res, operators = "max", filter = "", ofile = temptif(), ...
 #' @template param-filter
 #' @param xc,yc,r numeric. Circle centres and radius or radii.
 #' @param xmin,ymin,xmax,ymax numeric. Coordinates of the rectangles
+#' @param aoi Area of interest read and processed by `reader_polygons()`. Either a WKT
+#' `POLYGON`/`MULTIPOLYGON` string, an `sf`/`sfc` object, or a list of coordinate rings given as
+#' two-column matrices, one list per polygon for a multipolygon. Coordinates are expected in the CRS
+#' of the point cloud: no reprojection is performed. The bounding box of each polygon defines a
+#' chunk, like the queries of `reader_rectangles()`, and the polygons clip the points of their own
+#' chunk.
 #' @param select character. Unused. Reserved for future versions.
 #' @param depth integer. Maximum octree depth level for COPC or EPT data. Depth is 0-indexed.
 #' When NULL (default), all levels are read.
@@ -1091,7 +1126,7 @@ rasterize = function(res, operators = "max", filter = "", ofile = temptif(), ...
 #' # terra::plot(ans)
 #' @export
 #' @md
-reader = function(filter = "", select = "*", depth = NULL, ...)
+reader = function(filter = "", select = "*", depth = NULL, aoi = NULL, ...)
 {
   p <- list(...)
   circle <- !is.null(p$xc)
@@ -1101,6 +1136,7 @@ reader = function(filter = "", select = "*", depth = NULL, ...)
   # otherwise they spill into copc_depth/ept_depth slots and corrupt argument matching.
   if (circle) return(reader_circles(filter = filter, select = select, depth = depth, ...))
   if (rectangle) return(reader_rectangles(filter = filter, select = select, depth = depth, ...))
+  if (!is.null(aoi)) return(reader_polygons(aoi, filter = filter, select = select, depth = depth, ...))
   return(reader_coverage(filter = filter, select = select, depth = depth, ...))
 }
 
@@ -1131,6 +1167,16 @@ reader_rectangles = function(xmin, ymin, xmax, ymax, filter = "", select = "*", 
   depth <- resolve_depth(depth, ...)
   if (is.null(depth)) depth = -1
   .APISTAGES$reader_rectangles(xmin, ymin, xmax, ymax, filter, select, depth)
+}
+
+#' @export
+#' @rdname reader
+reader_polygons = function(aoi, filter = "", select = "*", depth = NULL, ...)
+{
+  validate_filter(filter, TRUE)
+  depth <- resolve_depth(depth, ...)
+  if (is.null(depth)) depth = -1
+  .APISTAGES$reader_polygons(resolve_aoi(aoi), filter, select, depth)
 }
 
 #' Region growing
@@ -1378,6 +1424,14 @@ spikefree = function(res = 0.5, freeze_distance = 1, height_buffer = 0.5, filter
 #' It also produces an histogram of Z and Intensity attributes for the **entiere point cloud**.
 #' It can also compute some metrics **for each file or chunk** with the same metric engine than \link{rasterize}.
 #' This stage does not modify the point cloud. It produces a summary as a `list`.
+#'
+#' The returned list includes `npoints`, `npoints_per_return`, `npoints_per_class`,
+#' the Z and Intensity histograms, the `crs`/`epsg`, and the coverage `area` (the
+#' sum of the processed bounding boxes, buffer excluded) together with `density`
+#' (point density = `npoints / area`) and `pulse_density` (pulse density =
+#' first returns / `area`). Following the convention used by `lidR`, the number
+#' of pulses is the number of first returns (`ReturnNumber == 1`); it is not
+#' derived from `gpstime`-based pulse identification.
 #'
 #' @param zwbin,iwbin numeric. Width of the bins for the histograms of Z and Intensity.
 #' @param metrics Character vector. "min", "max" and "count" are accepted as well

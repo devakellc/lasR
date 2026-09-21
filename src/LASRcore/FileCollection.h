@@ -8,6 +8,7 @@
 #include "Shape.h"
 #include "Header.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -39,6 +40,8 @@ public:
   void set_buffer(double buffer) { this->buffer = buffer; };
   void add_query(double xmin, double ymin, double xmax, double ymax);
   void add_query(double xcenter, double ycenter, double radius);
+  bool set_aoi(const std::string& wkt);
+  const PolygonShape* get_aoi() const { return aoi.get(); };
   bool set_noprocess(const std::vector<bool>& b);
   bool set_chunk_size(double size);
   bool get_chunk(int index, Chunk& chunk) const;
@@ -101,6 +104,10 @@ private:
   // queries, partial read
   FileCollectionIndex file_index;
   std::vector<Shape*> queries;
+
+  // area of interest clipping every chunk. Shared because each thread copies the Engine and thus
+  // the chunks it works on
+  std::shared_ptr<const PolygonShape> aoi;
 };
 
 #endif
