@@ -66,10 +66,12 @@ RCPP_MODULE(stages)
   function("hull", &api::hull, "Compute hull of a point cloud");
   function("hull_triangulation", &api::hull_triangulation, "Compute hull of a triangulation");
   function("info", &api::info, "Filter points with a grid layout");
+  function("keep_latest", &api::keep_latest, "Keep the most recent acquisition where several overlap");
   function("load_raster", &api::load_raster, "Load a raster from file");
   function("load_matrix", &api::load_matrix, "Load a 4x4 matrix");
   function("local_maximum", &api::local_maximum, "Local maximum filter on a point cloud");
   function("local_maximum_raster", &api::local_maximum_raster, "Local maximum filter on a raster");
+  function("multichm", &api::multichm, "Individual tree detection on a multi CHM");
   function("neighborhood_metrics", &nonapi::neighborhood_metrics, "Local metrics");
   function("nothing", &nonapi::nothing, "A debugging stage");
   function("pit_fill", &api::pit_fill, "CHM enhancement");

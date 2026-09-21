@@ -163,6 +163,11 @@ class TestFilteringAndSampling(unittest.TestCase):
         if not PYLASR_AVAILABLE:
             self.skipTest("pylasr not available")
 
+    def test_keep_latest(self):
+        """Test keep_latest pipeline creation"""
+        pipeline = pylasr.keep_latest(res=5.0, window=3600.0)
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
     def test_filter_with_grid(self):
         """Test filter_with_grid pipeline creation"""
         pipeline = pylasr.filter_with_grid(1.0, "min", [""])
@@ -208,6 +213,11 @@ class TestGeometricAnalysis(unittest.TestCase):
             use_attribute="Z",
             store_in_attributes="tree_top",
         )
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
+    def test_multichm(self):
+        """Test multichm pipeline creation"""
+        pipeline = pylasr.multichm(res=1.0, ws=5.0, min_height=2.0)
         self.assertIsInstance(pipeline, pylasr.Pipeline)
 
     def test_callback(self):

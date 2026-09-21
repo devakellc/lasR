@@ -98,6 +98,10 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
   pb.set_prefix("Read files headers");
   pb.set_display(progress);
 
+  // A local file that cannot be read is discarded like an empty one. A remote one may be a network failure
+  int discarded = 0;
+  auto discard = [&discarded](const std::string& f) { warning("File %s cannot be read and was discarded: %s\n", f.c_str(), last_error.c_str()); discarded++; };
+
   for (auto& file : files)
   {
     pb++;
@@ -107,7 +111,11 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
     // A LAS, LAZ, or remote LAS/LAZ file
     if (type == PathType::LASFILE || type == PathType::REMOTELASFILE)
     {
-      if (!add_las_file(file)) return false;
+      if (!add_las_file(file))
+      {
+        if (type == PathType::REMOTELASFILE) return false;
+        discard(file);
+      }
     }
     else if (type == PathType::EPTFILE || type == PathType::REMOTEEPTFILE)
     {
@@ -115,7 +123,7 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
     }
     else if (type == PathType::PCDFILE)
     {
-      if (!add_pcd_file(file)) return false;
+      if (!add_pcd_file(file)) discard(file);
     }
     // A virtual point cloud file
     else if (type == PathType::VPCFILE)
@@ -149,7 +157,7 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
           else if (type == PCDFILE)
             success = add_pcd_file(f);
 
-          if (!success) return false;
+          if (!success) discard(f);
         }
       }
     }
@@ -167,10 +175,10 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
 
   pb.done();
 
-  // Fix #160 with empty folders
+  // Fix #160 with empty folders. When every file was discarded the reason of the last one is the error
   if (this->files.size() == 0)
   {
-    last_error = "There is no file to read";
+    if (discarded == 0) last_error = "There is no file to read";
     return false;
   }
 
