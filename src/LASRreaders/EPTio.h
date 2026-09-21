@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <deque>
@@ -13,6 +14,7 @@
 
 class LASio;
 class Header;
+class PolygonShape;
 struct Point;
 
 class EPTio : public Fileio
@@ -45,12 +47,19 @@ public:
   int64_t p_count() override;
 
   void set_depth(int depth);
+  void set_aoi(const std::shared_ptr<const PolygonShape>& aoi) { this->aoi = aoi; };
 
   void query(const std::vector<std::string>& main_files,
              const std::vector<std::string>& neighbour_files,
              double xmin, double ymin, double xmax, double ymax,
              double buffer, bool circle,
              std::vector<std::string> filters);
+
+  size_t get_queried_points() const { return total_points; };
+
+  // Footprint and point count of every node the last query selected
+  struct Node { double xmin, ymin, xmax, ymax; size_t npoints; };
+  const std::vector<Node>& get_queried_nodes() const { return queried_nodes; };
 
 private:
   void parse_ept_json();
@@ -68,6 +77,10 @@ private:
   // EPT metadata
   std::string base_path;
   std::string query_string;  // URL query params (e.g. ?token=...) for signed URLs
+
+  // Prunes the traversal, null when there is none, with the buffer the nodes are grown by
+  std::shared_ptr<const PolygonShape> aoi;
+  double aoi_buffer;
   bool remote;
   bool opened;
   nlohmann::json ept_metadata;
@@ -86,6 +99,7 @@ private:
 
   // Hierarchy traversal state
   std::deque<EPTkey> tile_queue;
+  std::vector<Node> queried_nodes;
   int64_t total_points;
 
   // Current tile reader

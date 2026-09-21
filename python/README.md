@@ -168,6 +168,7 @@ pipeline = pylasr.reader_polygons(aoi="MULTIPOLYGON(((...)),((...)))") + pylasr.
 - `hulls()` - Compute convex hulls
 
 ### Segmentation & Tree Detection
+- `random_walker()` - Random walker segmentation for tree detection
 - `region_growing()` - Region growing segmentation for tree detection
 
 ### Data Loading & Transformation

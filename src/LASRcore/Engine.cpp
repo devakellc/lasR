@@ -470,6 +470,20 @@ double Engine::need_buffer()
   return MAX(buffer, required);
 }
 
+double Engine::memory_per_point() const
+{
+  double memory = 0;
+  for (auto&& stage : pipeline) memory += stage->memory_per_point();
+  return memory;
+}
+
+double Engine::memory_per_area() const
+{
+  double memory = 0;
+  for (auto&& stage : pipeline) memory += stage->memory_per_area();
+  return memory;
+}
+
 void Engine::sort()
 {
   // The vector 'order' contain the chunk IDs in the order they were computed. In sequential processing

@@ -74,6 +74,49 @@ def write_las(path, x, y, z, scale=0.001):
             ))
 
 
+def read_raster_cells(path):
+    """Read a lasR raster stage's output as a list of (x, y, value) for non-nodata cells.
+
+    Goes through gdal_translate to an Arc/Info ASCII Grid since there is no osgeo/rasterio
+    here either; ogrinfo (used for vector outputs) does not read rasters.
+    """
+    grid_path = path + ".asc"
+    if os.path.exists(grid_path):
+        os.remove(grid_path)
+    subprocess.run(
+        ["gdal_translate", "-of", "AAIGrid", path, grid_path],
+        check=True, capture_output=True,
+    )
+
+    header = {}
+    rows = []
+    with open(grid_path) as f:
+        for line in f:
+            key, _, rest = line.strip().partition(" ")
+            key = key.lower()
+            if key in ("ncols", "nrows"):
+                header[key] = int(rest)
+            elif key in ("xllcorner", "yllcorner", "cellsize", "nodata_value"):
+                header[key] = float(rest)
+            else:
+                rows.append([float(v) for v in line.split()])
+
+    cellsize = header["cellsize"]
+    nodata = header["nodata_value"]
+    nrows = header["nrows"]
+
+    cells = []
+    for row_idx, row in enumerate(rows):
+        y = header["yllcorner"] + (nrows - 1 - row_idx + 0.5) * cellsize
+        for col_idx, value in enumerate(row):
+            if value == nodata:
+                continue
+            x = header["xllcorner"] + (col_idx + 0.5) * cellsize
+            cells.append((x, y, value))
+
+    return cells
+
+
 def read_points(ofile):
     """Read back the (x, y, z) of every feature a lasR vector stage wrote to ofile."""
     csv_path = ofile + ".csv"

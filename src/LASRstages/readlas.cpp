@@ -23,15 +23,29 @@ bool LASRlasreader::set_chunk(Chunk& chunk)
 
   lasio = new LASio();
 
+  // A circular query is already narrower than its own box and is left alone
+  double qxmin = chunk.xmin;
+  double qymin = chunk.ymin;
+  double qxmax = chunk.xmax;
+  double qymax = chunk.ymax;
+
+  if (chunk.aoi != nullptr && chunk.shape != ShapeType::CIRCLE)
+  {
+    qxmin = MAX(qxmin, chunk.aoi->xmin());
+    qymin = MAX(qymin, chunk.aoi->ymin());
+    qxmax = MIN(qxmax, chunk.aoi->xmax());
+    qymax = MIN(qymax, chunk.aoi->ymax());
+  }
+
   try
   {
     lasio->query(
         chunk.main_files,
         chunk.neighbour_files,
-        chunk.xmin,
-        chunk.ymin,
-        chunk.xmax,
-        chunk.ymax,
+        qxmin,
+        qymin,
+        qxmax,
+        qymax,
         chunk.buffer,
         chunk.shape == ShapeType::CIRCLE,
         filters);

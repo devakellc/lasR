@@ -15,7 +15,7 @@ import pytest
 # Add the parent directory to sys.path to import pylasr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test_utils import read_points, write_las
+from test_utils import read_points, read_raster_cells, write_las
 
 try:
     import pylasr
@@ -473,6 +473,76 @@ class TestQueryAcrossCollectionCrs(unittest.TestCase):
         self.assertGreater(result["npoints"], 0)
 
 
+def _cone_las(path, apex_x, apex_y, apex_h):
+    """A single-apex conical canopy, wide enough to exercise a real max_cr and chunk size"""
+    x, y, z = [], [], []
+    for xi in range(int(apex_x) - 75, int(apex_x) + 76):
+        for yi in range(int(apex_y) - 75, int(apex_y) + 76):
+            d = ((xi - apex_x) ** 2 + (yi - apex_y) ** 2) ** 0.5
+            x.append(float(xi))
+            y.append(float(yi))
+            z.append(max(0.5, apex_h - d))
+    write_las(path, x, y, z)
+
+
+class TestRandomWalker(unittest.TestCase):
+    """Regression tests for random_walker's buffer size and crown radius bugs"""
+
+    APEX = (135.5, 125.5, 30.0)
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+        self.las = os.path.join(self.temp_dir, "cone.las")
+        _cone_las(self.las, *self.APEX)
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _run(self, max_cr, chunk=None):
+        tif = os.path.join(self.temp_dir, f"out_{chunk}.tif")
+        chm = pylasr.rasterize(1.0, 1.0, ["max"])
+        seed = pylasr.local_maximum_raster(chm, 5, min_height=2.0)
+        tree = pylasr.random_walker(chm, seed, max_cr=max_cr, ofile=tif)
+        pipeline = chm + seed + tree
+        if chunk:
+            pipeline.set_chunk(chunk)
+        result = pylasr.execute(pipeline, [self.las])
+        self.assertTrue(result["success"], result.get("message"))
+        return read_raster_cells(tif)
+
+    def test_buffer_derives_from_max_cr(self):
+        """A chunk boundary must not lose cells a seed just beyond it should still own"""
+        unchunked = self._run(max_cr=40.0)
+        chunked = self._run(max_cr=40.0, chunk=50.0)
+        self.assertEqual(len(chunked), len(unchunked))
+
+    def test_crown_radius_enforced(self):
+        """No labeled cell may lie beyond max_cr/2 of the seed that claims it"""
+        max_cr = 10.0
+        apex_x, apex_y, _ = self.APEX
+        cells = self._run(max_cr=max_cr)
+
+        self.assertGreater(len(cells), 0)
+        for x, y, _ in cells:
+            dist = ((x - apex_x) ** 2 + (y - apex_y) ** 2) ** 0.5
+            # +1 cell for the seed-to-cell-center snap, not the sqrt(2) a square window allowed
+            self.assertLessEqual(dist, max_cr / 2 + 1.0)
+
+    def test_max_cr_must_be_positive(self):
+        """A non-positive max_cr must be rejected, not walk the solver off the raster"""
+        chm = pylasr.rasterize(1.0, 1.0, ["max"])
+        seed = pylasr.local_maximum_raster(chm, 5, min_height=2.0)
+        tree = pylasr.random_walker(chm, seed, max_cr=-5.0)
+        pipeline = chm + seed + tree
+
+        with self.assertRaises(ValueError):
+            pylasr.execute(pipeline, [self.las])
+
+
 class TestMultichm(unittest.TestCase):
     """Regression tests for the multichm buffer size and tie-handling bugs"""
 
@@ -615,6 +685,14 @@ class TestAreaOfInterest(unittest.TestCase):
         self.assertTrue(result["success"], "Pipeline execution failed")
         self.assertEqual(result["data"][0]["summary"]["npoints"], self.npoints(aoi))
 
+    def test_auto_chunking_does_not_change_the_points(self):
+        """Chunks sized on the memory they can afford keep every point of the area"""
+        aoi = self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX)
+        pipeline = pylasr.reader_polygons(aoi=aoi) + pylasr.rasterize(res=0.05, window=0) + pylasr.summarise()
+        result = pipeline.execute([self.las])
+        self.assertTrue(result["success"], "Pipeline execution failed")
+        self.assertEqual(result["data"][0]["summary"]["npoints"], self.npoints(aoi))
+
     def test_aoi_chunking_tiles_the_rasters(self):
         """The tiles of a chunked area of interest are written one by one"""
         aoi = self.box(self.XMIN, self.YMIN, self.XMID, self.YMAX)
@@ -639,6 +717,42 @@ class TestAreaOfInterest(unittest.TestCase):
             self.npoints("POLYGON((0 0, 1 1")
         with self.assertRaises(Exception):
             self.npoints("POINT(0 0)")
+
+    def test_aoi_clips_ept_like_las(self):
+        """An EPT endpoint is clipped exactly like the LAS holding the same points"""
+        ept = None
+        for path in [
+            "../inst/extdata/ept-test-multi/ept.json",
+            "../../inst/extdata/ept-test-multi/ept.json",
+            "../../../inst/extdata/ept-test-multi/ept.json",
+        ]:
+            full_path = os.path.join(os.path.dirname(__file__), path)
+            if os.path.exists(full_path):
+                ept = full_path
+                break
+
+        if not ept:
+            self.skipTest("EPT test endpoint not found")
+
+        concave = (
+            "POLYGON((273357 5274357, 273500 5274357, 273500 5274500, 273643 5274500, "
+            "273643 5274643, 273357 5274643, 273357 5274357))"
+        )
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            counts = []
+            for name, source in [("ept", ept), ("las", self.las)]:
+                written = os.path.join(temp_dir, f"aoi_{name}.las")
+                pipeline = pylasr.reader_polygons(aoi=concave) + pylasr.write_las(ofile=written)
+                self.assertTrue(pipeline.execute([source])["success"], "Pipeline execution failed")
+
+                pipeline = pylasr.reader_coverage() + pylasr.summarise()
+                counts.append(pipeline.execute([written])["data"][0]["summary"]["npoints"])
+
+            self.assertEqual(counts[0], counts[1])
+        finally:
+            shutil.rmtree(temp_dir)
 
     def test_island_in_a_hole_is_not_double_counted(self):
         """The island's box sits entirely inside the donut's box: a point there must be read once"""

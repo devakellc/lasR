@@ -4,6 +4,7 @@
 #include "error.h"
 #include "print.h"
 #include "Grid.h"
+#include "GridPartition.h"
 #include "PointSchema.h"
 
 // To read the header of files
@@ -61,6 +62,27 @@ static std::string filename_from_url(const std::string& url)
   if (name.size() > 5 && name.substr(name.size() - 5) == ".copc")
     name = name.substr(0, name.size() - 5);
   return name;
+}
+
+// A group of the spatial index: a node of its map and the heap block of its intervals
+#define GROUP_BYTES 64
+
+// How many times a layout may be shrunk on the density of its densest tile
+#define AUTO_CHUNK_PASSES 4
+
+// Bytes a chunk holds per square metre it covers, at a given density of points
+static double bytes_per_m2(double density, double bytes_per_point, double bytes_per_area)
+{
+  double bytes = density*bytes_per_point + bytes_per_area;
+
+  // A point cloud that is held is also indexed
+  if (bytes_per_point > 0)
+  {
+    double res = GridPartition::guess_resolution_from_density(density);
+    bytes += MIN(density, 1.0/(res*res))*GROUP_BYTES + density*sizeof(Interval);
+  }
+
+  return bytes;
 }
 
 bool FileCollection::read(const std::vector<std::string>& files, bool progress)
@@ -678,19 +700,21 @@ bool FileCollection::add_ept_endpoint(std::string path, bool noprocess)
   std::replace(path.begin(), path.end(), '\\', '/');
 
   Header header;
-  EPTio reader;
+  auto reader = std::make_unique<EPTio>();
 
   try
   {
-    reader.open(path);
-    reader.populate_header(&header);
-    reader.close();
+    reader->open(path);
+    reader->populate_header(&header);
   }
   catch (const std::exception& e)
   {
     last_error = e.what();
     return false;
   }
+
+  // Left open: estimate_points() queries it directly instead of re-parsing ept.json each time
+  ept_reader = std::move(reader);
 
   add_header(header, noprocess);
   files.push_back(path);
@@ -755,6 +779,36 @@ bool FileCollection::set_noprocess(const std::vector<bool>& b)
   return true;
 }
 
+void FileCollection::tile_extent(double exmin, double eymin, double exmax, double eymax, double size, std::vector<Shape*>& tiles) const
+{
+  double gxmin = MAX(xmin, exmin);
+  double gymin = MAX(ymin, eymin);
+  double gxmax = MIN(xmax, exmax);
+  double gymax = MIN(ymax, eymax);
+
+  if (gxmin > gxmax || gymin > gymax) return;
+
+  Grid grid(gxmin, gymin, gxmax, gymax, size);
+  for (int i = 0 ; i < grid.get_ncells() ; i++)
+  {
+    double x = grid.x_from_cell(i);
+    double y = grid.y_from_cell(i);
+    double hsize = size/2;
+
+    // The grid snaps to a lattice of its own resolution, so the border tiles overflow the extent
+    double txmin = MAX(x-hsize, gxmin);
+    double tymin = MAX(y-hsize, gymin);
+    double txmax = MIN(x+hsize, gxmax);
+    double tymax = MIN(y+hsize, gymax);
+
+    if (txmin >= txmax || tymin >= tymax) continue;
+    if (!file_index.has_overlap(txmin, tymin, txmax, tymax)) continue;
+    if (aoi != nullptr && !aoi->intersects(txmin, tymin, txmax, tymax)) continue;
+
+    tiles.push_back(new Rectangle(txmin, tymin, txmax, tymax));
+  }
+}
+
 bool FileCollection::set_chunk_size(double size)
 {
   chunk_size = 0;
@@ -773,44 +827,196 @@ bool FileCollection::set_chunk_size(double size)
 
     // Each polygon is tiled in its own bounding box. Tiling the bounding box of the whole area of
     // interest instead would walk a grid spanning the gaps between distant polygons.
-    std::vector<Rectangle> extents;
-    if (aoi == nullptr)
-      extents.emplace_back(xmin, ymin, xmax, ymax);
-    else
-      for (const auto q : queries) extents.emplace_back(q->xmin(), q->ymin(), q->xmax(), q->ymax());
-
     std::vector<Shape*> tiles;
 
-    for (const auto& extent : extents)
-    {
-      double gxmin = MAX(xmin, extent.xmin());
-      double gymin = MAX(ymin, extent.ymin());
-      double gxmax = MIN(xmax, extent.xmax());
-      double gymax = MIN(ymax, extent.ymax());
+    if (aoi == nullptr)
+      tile_extent(xmin, ymin, xmax, ymax, size, tiles);
+    else
+      for (const auto q : queries) tile_extent(q->xmin(), q->ymin(), q->xmax(), q->ymax(), size, tiles);
 
-      if (gxmin > gxmax || gymin > gymax) continue;
-
-      Grid grid(gxmin, gymin, gxmax, gymax, chunk_size);
-      for (int i = 0 ; i < grid.get_ncells() ; i++)
-      {
-        double x = grid.x_from_cell(i);
-        double y = grid.y_from_cell(i);
-        double hsize = size/2;
-
-        if (!file_index.has_overlap(x-hsize, y-hsize, x+hsize, y+hsize)) continue;
-        if (aoi != nullptr && !aoi->intersects(x-hsize, y-hsize, x+hsize, y+hsize)) continue;
-
-        tiles.push_back(new Rectangle(x-hsize, y-hsize, x+hsize, y+hsize));
-      }
-    }
-
-    // A grid reaching nothing leaves the queries untouched: an area of interest outside the
-    // collection keeps its own empty chunk instead of falling back to a chunk per file.
+    // An area of interest outside the collection keeps its own empty chunk
     if (tiles.empty()) return true;
 
     for (auto p : queries) delete p;
     queries = tiles;
   }
+
+  return true;
+}
+
+size_t FileCollection::get_point_size() const
+{
+  return headers.empty() ? 0 : headers[0].schema.total_point_size;
+}
+
+size_t FileCollection::estimate_points(double qxmin, double qymin, double qxmax, double qymax)
+{
+  density_nodes.clear();
+
+  double npoints = 0;
+  for (size_t i = 0 ; i < headers.size() ; i++)
+  {
+    const Header& h = headers[i];
+    if (h.max_x < qxmin - buffer || h.min_x > qxmax + buffer || h.max_y < qymin - buffer || h.min_y > qymax + buffer)
+      continue;
+
+    // An EPT header counts no point. Its hierarchy knows exactly how many the nodes of a query hold
+    if (h.signature == "EPTF" && ept_reader)
+    {
+      try
+      {
+        ept_reader->query({files[i].string()}, {}, qxmin, qymin, qxmax, qymax, buffer, false, {});
+        for (const auto& n : ept_reader->get_queried_nodes())
+          density_nodes.push_back({n.xmin, n.ymin, n.xmax, n.ymax, n.npoints});
+        npoints += ept_reader->get_queried_points();
+        continue;
+      }
+      catch (const std::exception&)
+      {
+        // fall back on the header
+      }
+    }
+
+    // Elsewhere the points of a file are assumed to spread evenly over its bounding box
+    density_nodes.push_back({h.min_x, h.min_y, h.max_x, h.max_y, (size_t)h.number_of_point_records});
+
+    double area = (h.max_x - h.min_x) * (h.max_y - h.min_y);
+    double ox = MIN(qxmax, h.max_x) - MAX(qxmin, h.min_x);
+    double oy = MIN(qymax, h.max_y) - MAX(qymin, h.min_y);
+    if (area > 0 && ox > 0 && oy > 0) npoints += (double)h.number_of_point_records * (ox*oy) / area;
+  }
+
+  return (size_t)npoints;
+}
+
+size_t FileCollection::count_points(double qxmin, double qymin, double qxmax, double qymax) const
+{
+  // Counting a straddling node whole would make a clipped border tile the densest thing around
+  double npoints = 0;
+  for (const auto& n : density_nodes)
+  {
+    double area = (n.xmax - n.xmin)*(n.ymax - n.ymin);
+    if (area <= 0) continue;
+
+    double ox = MIN(qxmax, n.xmax) - MAX(qxmin, n.xmin);
+    double oy = MIN(qymax, n.ymax) - MAX(qymin, n.ymin);
+    if (ox <= 0 || oy <= 0) continue;
+
+    npoints += (double)n.npoints * (ox*oy) / area;
+  }
+
+  return (size_t)npoints;
+}
+
+double FileCollection::peak_density(const Shape* query, double side) const
+{
+  std::vector<Shape*> tiles;
+  tile_extent(query->xmin(), query->ymin(), query->xmax(), query->ymax(), side, tiles);
+
+  double peak = 0;
+  for (const auto t : tiles)
+  {
+    // A tile holds what it reads, its own extent grown by the buffer
+    double rxmin = t->xmin() - buffer;
+    double rymin = t->ymin() - buffer;
+    double rxmax = t->xmax() + buffer;
+    double rymax = t->ymax() + buffer;
+    double area = (rxmax - rxmin)*(rymax - rymin);
+
+    if (area > 0)
+    {
+      double density = (double)count_points(rxmin, rymin, rxmax, rymax)/area;
+      if (density > peak) peak = density;
+    }
+
+    delete t;
+  }
+
+  return peak;
+}
+
+bool FileCollection::set_auto_chunk(double budget_bytes, double bytes_per_point, double bytes_per_area)
+{
+  if (chunk_size > 0 || budget_bytes <= 0 || queries.empty()) return true;
+
+  std::vector<Shape*> tiles;
+  bool tiled = false;
+
+  for (const auto q : queries)
+  {
+    // A circle carries its shape to the point filter. Rectangles would read the corners it excludes
+    if (q->type() != ShapeType::RECTANGLE)
+    {
+      tiles.push_back(new Rectangle(q->xmin(), q->ymin(), q->xmax(), q->ymax()));
+      continue;
+    }
+
+    double width  = q->xmax() - q->xmin();
+    double height = q->ymax() - q->ymin();
+    double area = width*height;
+    size_t npoints = estimate_points(q->xmin(), q->ymin(), q->xmax(), q->ymax());
+
+    if (area <= 0 || npoints == 0)
+    {
+      tiles.push_back(new Rectangle(q->xmin(), q->ymin(), q->xmax(), q->ymax()));
+      continue;
+    }
+
+    double density = (double)npoints/area;
+    double cost = bytes_per_m2(density, bytes_per_point, bytes_per_area);
+
+    if (cost <= 0)
+    {
+      tiles.push_back(new Rectangle(q->xmin(), q->ymin(), q->xmax(), q->ymax()));
+      continue;
+    }
+
+    // A chunk is measured on what it reads, its own extent plus the buffer
+    if ((width + 2*buffer)*(height + 2*buffer) <= budget_bytes/cost)
+    {
+      tiles.push_back(new Rectangle(q->xmin(), q->ymin(), q->xmax(), q->ymax()));
+      continue;
+    }
+
+    double side = std::sqrt(budget_bytes/cost) - 2*buffer;
+
+    // An average density hides the tiles denser than it, and one tile over budget ends the run.
+    // The side only ever decreases, so this settles
+    for (int pass = 0 ; pass < AUTO_CHUNK_PASSES && side > 2*buffer ; pass++)
+    {
+      double peak = peak_density(q, side);
+      if (peak <= density) break;
+
+      double shrunk = std::sqrt(budget_bytes/bytes_per_m2(peak, bytes_per_point, bytes_per_area)) - 2*buffer;
+      if (shrunk >= side) break;
+
+      side = shrunk;
+      density = peak;
+      cost = bytes_per_m2(density, bytes_per_point, bytes_per_area);
+    }
+
+    // Past this a chunk reads four times the points it owns, so the budget gives way to the buffer
+    if (side < 2*buffer)
+    {
+      side = 2*buffer;
+      double held = cost*(side + 2*buffer)*(side + 2*buffer);
+      warning("Chunks of %.0lf m hold %.0lf MB, more than the %.0lf MB they can afford. Reduce the buffer, the number of concurrent files, or the resolution.\n", side, held/1e6, budget_bytes/1e6);
+    }
+
+    size_t before = tiles.size();
+    tile_extent(q->xmin(), q->ymin(), q->xmax(), q->ymax(), side, tiles);
+
+    if (tiles.size() > before + 1) tiled = true;
+  }
+
+  if (!tiled)
+  {
+    for (auto p : tiles) delete p;
+    return true;
+  }
+
+  for (auto p : queries) delete p;
+  queries = tiles;
 
   return true;
 }

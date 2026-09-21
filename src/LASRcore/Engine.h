@@ -41,6 +41,8 @@ public:
   bool is_streamable() const;
   bool use_rcapi() const;
   double need_buffer();
+  double memory_per_point() const;
+  double memory_per_area() const;
   bool need_points() const;
   bool set_chunk(Chunk& chunk);
   void set_ncpu(int ncpu);
