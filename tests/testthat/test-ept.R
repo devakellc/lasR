@@ -85,12 +85,28 @@ test_that("Several EPT endpoints are read together under a query",
   expect_equal(two$npoints, 2 * one$npoints)
 })
 
-test_that("An EPT endpoint cannot be mixed with a LAS file",
+test_that("a LAS file and an EPT endpoint are read together",
+{
+  ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
+
+  # a LAS written from the EPT inherits its scale and offset, so the two agree
+  las <- tempfile(fileext = ".las")
+  exec(reader() + write_las(las), on = ept, noread = TRUE)
+
+  query <- reader_rectangles(273360, 5274360, 273490, 5274490)
+  one <- exec(query + summarise(), on = ept)
+  two <- exec(query + summarise(), on = c(ept, las))
+
+  expect_equal(two$npoints, 2 * one$npoints)
+})
+
+test_that("sources that disagree on scale or offset are refused",
 {
   ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
   las <- system.file("extdata", "Topography.las", package = "lasR")
 
-  expect_error(exec(reader() + summarise(), on = c(ept, las)), "mix different file formats")
+  query <- reader_rectangles(273360, 5274360, 273490, 5274490)
+  expect_error(exec(query + summarise(), on = c(ept, las)), "scale or offset")
 })
 
 test_that("an area of interest prunes the EPT octree traversal",
