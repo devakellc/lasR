@@ -836,12 +836,22 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
     chunk.ymax = maxy;
   }
 
-  if (chunk.xmin < xmin) chunk.xmin = xmin;
-  if (chunk.xmax > xmax) chunk.xmax = xmax;
-  if (chunk.ymin < ymin) chunk.ymin = ymin;
-  if (chunk.ymax > ymax) chunk.ymax = ymax;
   chunk.buffer = buffer;
   chunk.shape = q->type();
+  chunk.crop_xmin = std::max(chunk.xmin, xmin);
+  chunk.crop_ymin = std::max(chunk.ymin, ymin);
+  chunk.crop_xmax = std::min(chunk.xmax, xmax);
+  chunk.crop_ymax = std::min(chunk.ymax, ymax);
+
+  // Readers and buffer checks reconstruct circles from these bounds. Clipping
+  // them would move the centre and change the radius of the requested query.
+  if (chunk.shape != ShapeType::CIRCLE)
+  {
+    chunk.xmin = chunk.crop_xmin;
+    chunk.ymin = chunk.crop_ymin;
+    chunk.xmax = chunk.crop_xmax;
+    chunk.ymax = chunk.crop_ymax;
+  }
 
   // With an R data.frame there is no file and thus no neighboring files. We can exit.
   if (use_dataframe)

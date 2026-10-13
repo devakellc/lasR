@@ -40,6 +40,9 @@ public:
 private:
   int buffer;
   bool circular;
+  double circle_center_x = 0;
+  double circle_center_y = 0;
+  double circle_radius = 0;
   double extent[4]; // The actual full bbox of the underlying raster which is constant contrary to the grid bbox that correspond to the current chunk
   std::vector<float> data;
 };

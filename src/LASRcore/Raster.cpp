@@ -52,6 +52,9 @@ Raster::Raster(const Raster& raster) : Grid(raster), GDALdataset()
   GDALdataset::set_raster(this->xmin, this->ymax, this->ncols, this->nrows, this->xres);
   buffer = raster.buffer;
   circular = raster.circular;
+  circle_center_x = raster.circle_center_x;
+  circle_center_y = raster.circle_center_y;
+  circle_radius = raster.circle_radius;
   set_nbands(raster.nBands);
   band_names = raster.band_names;
   nodata = raster.nodata;
@@ -60,7 +63,7 @@ Raster::Raster(const Raster& raster) : Grid(raster), GDALdataset()
 
 // Copy constructor with bounding box. Creates a raster identical to the input
 // (same number of bands, crs, band names, etc.) but with an extent that is different.
-Raster::Raster(const Raster& raster, const Chunk& chunk) : Grid (chunk.xmin, chunk.ymin, chunk.xmax, chunk.ymax, raster.get_xres()), GDALdataset()
+Raster::Raster(const Raster& raster, const Chunk& chunk) : Grid (chunk.raster_xmin(), chunk.raster_ymin(), chunk.raster_xmax(), chunk.raster_ymax(), raster.get_xres()), GDALdataset()
 {
   extent[0] = this->xmin;
   extent[1] = this->ymin;
@@ -255,13 +258,26 @@ void Raster::set_chunk(const Chunk& chunk)
   buffer = std::ceil(chunk.buffer/xres); // buffer in pixel
   circular = chunk.shape == ShapeType::CIRCLE;
 
+  // Keep the existing pixel-aligned circular mask, located in the original
+  // query rather than centred on a grid cropped to the available data.
+  if (circular)
+  {
+    double query_xmin = ROUNDANY(chunk.xmin - 0.5 * xres, xres);
+    double query_ymin = ROUNDANY(chunk.ymin - 0.5 * yres, yres);
+    double query_xmax = ROUNDANY(chunk.xmax - 0.5 * xres, xres) + xres;
+    double query_ymax = ROUNDANY(chunk.ymax - 0.5 * yres, yres) + yres;
+    circle_center_x = (query_xmin + query_xmax) / 2;
+    circle_center_y = (query_ymin + query_ymax) / 2;
+    circle_radius = (query_xmax - query_xmin) / 2;
+  }
+
   //print("Chunk %.1lf %.1lf %.1lf %.1lf (+%.1lf m)\n", chunk.xmin, chunk.xmax, chunk.ymin, chunk.ymax, chunk.buffer);
 
   // Adjust the grid to the chunk
-  xmin = ROUNDANY(chunk.xmin - 0.5 * xres, xres) ;
-  ymin = ROUNDANY(chunk.ymin - 0.5 * xres, xres) ;
-  xmax = ROUNDANY(chunk.xmax - 0.5 * xres, xres) + xres;
-  ymax = ROUNDANY(chunk.ymax - 0.5 * yres, yres) + yres;
+  xmin = ROUNDANY(chunk.raster_xmin() - 0.5 * xres, xres) ;
+  ymin = ROUNDANY(chunk.raster_ymin() - 0.5 * xres, xres) ;
+  xmax = ROUNDANY(chunk.raster_xmax() - 0.5 * xres, xres) + xres;
+  ymax = ROUNDANY(chunk.raster_ymax() - 0.5 * yres, yres) + yres;
 
   //print("Raster %.1lf %.1lf %.1lf %.1lf (+%d pix)\n", xmin, xmax, ymin, ymax, buffer);
 
@@ -443,18 +459,6 @@ bool Raster::write()
       //printf("There is a buffer of size %d that need to be removed in the raster\n", buffer);
       int ncols_no_buffer = ncols - 2*buffer;
       int nrows_no_buffer = nrows - 2*buffer;
-      float centerx = (float)ncols_no_buffer/2;
-      float centery = (float)nrows_no_buffer/2;
-      float chunk_width = (xmax-xmin)/xres - 2*buffer;
-      float chunk_hwidth = chunk_width/2;
-
-      /*print("pix buffer %d\n", buffer);
-      print("dim w buf %d x %d\n", ncols, nrows);
-      print("dim no buf %d x %d\n", ncols_no_buffer, nrows_no_buffer);
-      print("center (%.1f %.1f)\n", centerx, centery);
-      print("width %.1f\n",chunk_width);
-      print("shape %s\n", (circular) ? "circular" : "rectangle");*/
-
       std::vector<float> data_no_buffer(ncols_no_buffer*nrows_no_buffer);
       std::fill(data_no_buffer.begin(), data_no_buffer.end(), nodata);
       for (int row = buffer ; row < nrows - buffer ; ++row)
@@ -472,12 +476,9 @@ bool Raster::write()
           // Remove the buffer but the query is circular
           if (circular)
           {
-            float centerx = (float)ncols_no_buffer/2;
-            float centery = (float)nrows_no_buffer/2;
-            float dx = new_col - centerx;
-            float dy = new_row - centery;
-            float distance = std::sqrt(dx*dx+dy*dy);
-            if (distance > chunk_hwidth) val = NA_F32_RASTER;
+            double dx = xmin + col*xres - circle_center_x;
+            double dy = ymax - row*yres - circle_center_y;
+            if (dx*dx + dy*dy > circle_radius*circle_radius) val = NA_F32_RASTER;
           }
 
           data_no_buffer[modifiedIndex] = val;
