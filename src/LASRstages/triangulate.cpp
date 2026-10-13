@@ -129,6 +129,13 @@ bool LASRtriangulate::interpolate(std::vector<double>& res, const Raster* raster
 
     TriangleXYZ triangle(a, b, c);
 
+    // Delaunator uses jittered XY coordinates, but interpolation uses the
+    // original points. A triangle can therefore have zero area here, causing
+    // division by zero and invalid heights. Ignore it without overwriting
+    // values supplied by a neighbouring, non-degenerate triangle.
+    double area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (area == 0) continue;
+
     // Interpolate in this triangle if the longest edge fulfill requirements
     bool keep_triangle = (keep_large) ? triangle.square_max_edge_size() > trim : triangle.square_max_edge_size() < trim;
     if (trim == 0 || keep_triangle)
