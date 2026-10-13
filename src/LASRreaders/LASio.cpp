@@ -254,17 +254,20 @@ void LASio::populate_header(Header* header, bool read_first_point)
             (int)lasreader->header.get_attributes_size(), (int)lasreader->point.extra_bytes_number);
   }
 
+  // Preserve the raw header indices even when an attribute is not supported.
+  extrabytes.clear();
+  extrabytes.resize(lasreader->header.number_attributes);
   for (int i = 0 ; i < lasreader->header.number_attributes ; i++)
   {
     std::string name(lasreader->header.attributes[i].name);
     std::string description(lasreader->header.attributes[i].description);
     int data_type = lasreader->header.attributes[i].data_type;
-    if (data_type > 10) continue; // Don't read deprecated types
+    if (data_type == 0 || data_type > 10) continue; // Skip raw bytes and deprecated types
     AttributeType type = static_cast<AttributeType>(data_type);
     double scale = lasreader->header.attributes[i].scale[0];
     double offset = lasreader->header.attributes[i].offset[0];
     header->schema.add_attribute(name, type, scale, offset, description);
-    extrabytes.push_back(AttributeAccessor(name));
+    extrabytes[i] = AttributeAccessor(name);
   }
 
   header->schema.add_attribute("EdgeOfFlightline", AttributeType::BIT, 1, 0, "Set when the point is at the end of a scan");
@@ -535,7 +538,8 @@ bool LASio::read_point(Point* p)
   nir(p, lasreader->point.get_NIR());
   for (int i = 0 ; i < lasreader->header.number_attributes ; i++)
   {
-    if (lasreader->header.attributes[i].data_type > 10) continue; // Don't read deprecated types
+    int data_type = lasreader->header.attributes[i].data_type;
+    if (data_type == 0 || data_type > 10) continue; // Skip raw bytes and deprecated types
     // #117: skip extra-byte attributes that the point record does not actually back
     // (malformed Extra Bytes VLR, see populate_header) to avoid a null/OOB dereference.
     if (lasreader->point.extra_bytes == nullptr ||

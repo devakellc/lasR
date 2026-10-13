@@ -1,6 +1,8 @@
 # lasR 0.21.2
 
 - Fix: #338 callback returning R object with multiple files
+- Fix: skip unsupported extra-byte fields while preserving subsequent scalar
+  attribute values, preventing reader crashes and invalid raw-byte values.
 
 # lasR 0.21.1
 
