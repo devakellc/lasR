@@ -31,6 +31,8 @@ point Z coordinate (typically to build a normalization stage). When used with \c
 interpolated value is written as-is into \code{store_in_attribute} without any Z arithmetic - useful for
 attaching per-point labels such as a tree-segmentation ID. The interpolation method is linear in the
 triangle mesh and bilinear in the raster.\cr
+Triangles with collinear XY vertices cannot support interpolation and are ignored. Points without
+an interpolated value are discarded for \code{"-"} and \code{"+"}; \code{"="} leaves their target attribute unchanged.\cr
 When used with a 4x4 Rotation-Translation Matrix, it multiplies the coordinates of the points to apply
 the rigid transformation described by the matrix. This stage modifies the point cloud in the pipeline
 but does not produce any output.
