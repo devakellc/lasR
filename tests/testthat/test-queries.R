@@ -121,7 +121,9 @@ test_that("reader_circle works with a buffer (#141)",
   res2 = read_las(res2$write_las)
 
   expect_equal(res1, res2)
-  expect_equal(dim(res1), c(29488, 18))
+  points = read_las(file)
+  expected = sum((points$X - 481305)^2 + (points$Y - 3812966)^2 <= 50^2)
+  expect_equal(dim(res1), c(expected, 18))
 })
 
 test_that("circle buffer is removed #142",

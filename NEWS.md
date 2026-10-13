@@ -1,6 +1,8 @@
 # lasR 0.21.2
 
 - Fix: #338 callback returning R object with multiple files
+- Fix: circular queries retain their requested centre and radius at collection
+  boundaries, while raster allocation stays limited to the available extent.
 
 # lasR 0.21.1
 

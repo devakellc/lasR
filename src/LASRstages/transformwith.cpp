@@ -76,28 +76,29 @@ bool LASRtransformwith::set_chunk(Chunk& chunk)
   StageMatrix* mat = dynamic_cast<StageMatrix*>(it->second);
   if (mat != nullptr)
   {
-    double x1 = xmin;
-    double y1 = ymin;
-    double z1 = 0;
-    double x2 = xmax;
-    double y2 = ymin;
-    double z2 = 0;
-    double x3 = xmax;
-    double y3 = ymax;
-    double z3 = 0;
-    double x4 = xmin;
-    double y4 = ymax;
-    double z4 = 0;
+    auto transform_bounds = [mat](double& minx, double& miny,
+                                  double& maxx, double& maxy)
+    {
+      double x1 = minx, y1 = miny, z1 = 0;
+      double x2 = maxx, y2 = miny, z2 = 0;
+      double x3 = maxx, y3 = maxy, z3 = 0;
+      double x4 = minx, y4 = maxy, z4 = 0;
 
-    mat->transform(x1, y1, z1);
-    mat->transform(x2, y2, z2);
-    mat->transform(x3, y3, z3);
-    mat->transform(x4, y4, z4);
+      mat->transform(x1, y1, z1);
+      mat->transform(x2, y2, z2);
+      mat->transform(x3, y3, z3);
+      mat->transform(x4, y4, z4);
 
-    this->xmin = std::min(std::min(x1, x2), std::min(x3, x4));
-    this->ymin = std::min(std::min(y1, y2), std::min(y3, y4));
-    this->xmax = std::max(std::max(x1, x2), std::max(x3, x4));
-    this->ymax = std::max(std::max(y1, y2), std::max(y3, y4));
+      minx = std::min(std::min(x1, x2), std::min(x3, x4));
+      miny = std::min(std::min(y1, y2), std::min(y3, y4));
+      maxx = std::max(std::max(x1, x2), std::max(x3, x4));
+      maxy = std::max(std::max(y1, y2), std::max(y3, y4));
+    };
+
+    transform_bounds(xmin, ymin, xmax, ymax);
+    if (chunk.shape == ShapeType::CIRCLE)
+      transform_bounds(chunk.crop_xmin, chunk.crop_ymin,
+                       chunk.crop_xmax, chunk.crop_ymax);
 
     chunk.xmin = this->xmin;
     chunk.ymin = this->ymin;

@@ -24,6 +24,7 @@ struct Chunk
     ymax = 0;
     id = 0;
     shape = ShapeType::UNKNOWN;
+    crop_xmin = crop_ymin = crop_xmax = crop_ymax = 0;
     buffer = 0;
     process = true;
     name.clear();
@@ -49,6 +50,16 @@ struct Chunk
   double xmax;
   double ymax;
   double buffer;
+  // Circular query geometry must remain intact. Raster work can still be
+  // limited to its intersection with the file collection's bounding box.
+  double crop_xmin;
+  double crop_ymin;
+  double crop_xmax;
+  double crop_ymax;
+  double raster_xmin() const { return shape == ShapeType::CIRCLE ? crop_xmin : xmin; }
+  double raster_ymin() const { return shape == ShapeType::CIRCLE ? crop_ymin : ymin; }
+  double raster_xmax() const { return shape == ShapeType::CIRCLE ? crop_xmax : xmax; }
+  double raster_ymax() const { return shape == ShapeType::CIRCLE ? crop_ymax : ymax; }
   bool process;
   int id;
   ShapeType shape;
