@@ -4,6 +4,8 @@
 #include <iterator>
 #include <algorithm>
 #include <numeric>
+#include <limits>
+#include <cmath>
 
 LASRsummary::LASRsummary()
 {
@@ -11,6 +13,7 @@ LASRsummary::LASRsummary()
   nsingle = 0;
   nwithheld = 0;
   nsynthetic = 0;
+  metrics_engine.set_default_value(std::numeric_limits<float>::quiet_NaN());
 
   get_synthetic = AttributeAccessor("Synthetic");
   get_withheld = AttributeAccessor("Withheld");
@@ -82,6 +85,19 @@ bool LASRsummary::process(PointCloud*& las)
     process(p);
   }
 
+  record_metrics();
+
+  return true;
+}
+
+bool LASRsummary::process_empty()
+{
+  record_metrics();
+  return true;
+}
+
+void LASRsummary::record_metrics()
+{
   if (metrics_engine.active())
   {
     metric_chunk_ids.push_back(chunk_id);
@@ -89,13 +105,15 @@ bool LASRsummary::process(PointCloud*& las)
     {
       const std::string& name = metrics_engine.get_name(i);
       float val = metrics_engine.get_metric(i, cloud);
+      size_t separator = name.find('_');
+      std::string function = separator == std::string::npos ? name : name.substr(separator + 1);
+      if (cloud.empty() && function == "count") val = 0;
       metrics[name].push_back(val);
     }
 
     cloud.clear();
   }
 
-  return true;
 }
 
 void LASRsummary::merge(const Stage* other)
@@ -307,7 +325,7 @@ SEXP LASRsummary::to_R()
       const std::vector<float>& data = kv.second;
 
       SEXP vec = PROTECT(Rf_allocVector(REALSXP, nrows)); nsexpprotected++;
-      for (int i = 0; i < nrows; ++i) {  REAL(vec)[i] = data[i]; }
+      for (int i = 0; i < nrows; ++i) { REAL(vec)[i] = std::isnan(data[i]) ? NA_REAL : data[i]; }
 
       SET_STRING_ELT(colnames, colIdx, Rf_mkChar(name.c_str()));
       SET_VECTOR_ELT(df, colIdx, vec);

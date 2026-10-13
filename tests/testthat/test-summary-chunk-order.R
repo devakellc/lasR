@@ -43,20 +43,20 @@ test_that("summary orders its own rows when chunks stop at different stages",
     ans = exec(pipeline, on = files, ncores = strategy, buffer = 0,
                progress = FALSE)
     expect_equal(ans$summary$metrics$z_max, c(5, 6, 7))
-    expect_equal(ans$summary.1$metrics$z_max, c(5, 7))
+    expect_equal(ans$summary.1$metrics$z_max, c(5, NA_real_, 7))
     expect_equal(ans$summary$npoints, 12)
     expect_equal(ans$summary.1$npoints, 8)
   }
 })
 
-test_that("a skipped summary returns empty metric columns safely",
+test_that("a summary after height normalization reports an empty chunk safely",
 {
   f = system.file("extdata", "extra_byte.las", package = "lasR")
   ans = exec(hag() + summarise(metrics = c("z_max", "count")),
              on = f, progress = FALSE)
 
   expect_equal(ans$npoints, 0)
-  expect_equal(nrow(ans$metrics), 0L)
+  expect_equal(ans$metrics, data.frame(count = 0, z_max = NA_real_))
   expect_named(ans$metrics, c("count", "z_max"))
   expect_equal(unname(ans$z_histogram), 0)
   expect_equal(unname(ans$i_histogram), 0)

@@ -78,6 +78,8 @@ public:
   virtual bool process(Point*& p) { return true; };
   virtual bool process(PointCloud*& las) { return true; };
   virtual bool process(FileCollection*& las) { return true; };
+  // Notify output stages when an empty cloud stops the remaining pipeline.
+  virtual bool process_empty() { return true; };
   virtual bool break_pipeline() { return false; };
   virtual bool write() { return true; };
   virtual void clear(bool last = false) { return; };

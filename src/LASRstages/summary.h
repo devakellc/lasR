@@ -14,6 +14,7 @@ public:
   LASRsummary();
   bool process(Point*& p) override;
   bool process(PointCloud*& las) override;
+  bool process_empty() override;
   bool is_streamable() const override { return !metrics_engine.active(); }
   bool set_parameters(const nlohmann::json&) override;
   bool set_chunk(Chunk& chunk) override;
@@ -43,6 +44,7 @@ private:
   AttributeAccessor get_classification;
   AttributeAccessor get_number_of_returns;
   void reset_accessors();
+  void record_metrics();
 
   uint64_t npoints;
   uint64_t nsingle;

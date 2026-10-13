@@ -1291,6 +1291,10 @@ spikefree = function(res = 0.5, freeze_distance = 1, height_buffer = 0.5, filter
 #' @param metrics Character vector. "min", "max" and "count" are accepted as well
 #' as many others (see \link{metric_engine}). If `NULL` nothing is computed. If something is provided these
 #' metrics are computed for each chunk loaded. A chunk might be a file but may also be a plot (see examples).
+#' A loaded chunk with no points left retains a metric row: counts are zero and
+#' other metrics are `NA`. This also applies when the stage's filter selects no
+#' points. Chunks skipped before loading, or by a stop condition before this
+#' stage, do not produce a row.
 #' @template param-filter
 #' @examples
 #' f <- system.file("extdata", "Topography.las", package="lasR")
