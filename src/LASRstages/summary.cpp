@@ -2,6 +2,8 @@
 #include "openmp.h"
 
 #include <iterator>
+#include <algorithm>
+#include <numeric>
 
 LASRsummary::LASRsummary()
 {
@@ -28,7 +30,15 @@ bool LASRsummary::set_parameters(const nlohmann::json& stage)
 
   if (!metrics_engine.parse(metrics, false)) return false;
 
+  for (const auto& name : metrics) this->metrics[name] = {};
+
   return true;
+}
+
+bool LASRsummary::set_chunk(Chunk& chunk)
+{
+  chunk_id = chunk.id;
+  return Stage::set_chunk(chunk);
 }
 
 bool LASRsummary::process(Point*& p)
@@ -74,6 +84,7 @@ bool LASRsummary::process(PointCloud*& las)
 
   if (metrics_engine.active())
   {
+    metric_chunk_ids.push_back(chunk_id);
     for (int i = 0 ; i < metrics_engine.size() ; i++)
     {
       const std::string& name = metrics_engine.get_name(i);
@@ -104,6 +115,7 @@ void LASRsummary::merge(const Stage* other)
 
   if (metrics_engine.active())
   {
+    metric_chunk_ids.insert(metric_chunk_ids.end(), o->metric_chunk_ids.begin(), o->metric_chunk_ids.end());
     for (const auto& pair : o->metrics)
     {
       const std::string& key = pair.first;
@@ -113,12 +125,21 @@ void LASRsummary::merge(const Stage* other)
   }
 }
 
-void LASRsummary::sort(const std::vector<int>& order)
+void LASRsummary::sort(const std::vector<int>&)
 {
+  // A later stage can empty a chunk and remove it from the engine's order.
+  // Order only the chunks that actually contributed a row to this summary.
+  std::vector<size_t> order(metric_chunk_ids.size());
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(), [this](size_t a, size_t b)
+  {
+    return metric_chunk_ids[a] < metric_chunk_ids[b];
+  });
+
   for (auto& pair : metrics)
   {
     std::vector<float> ordered(pair.second.size());
-    for (size_t i = 0 ; i < pair.second.size() ; i++) ordered[order[i]] = pair.second[i];
+    for (size_t i = 0 ; i < pair.second.size() ; i++) ordered[i] = pair.second[order[i]];
     pair.second.swap(ordered);
   }
 }
@@ -205,7 +226,7 @@ SEXP LASRsummary::to_R()
   }
   else
   {
-    hmin = zhistogram.begin()->first;
+    hmin = zhistogram.empty() ? 0 : zhistogram.begin()->first;
     hmax = hmin;
     nbins = 1;
   }
@@ -231,7 +252,7 @@ SEXP LASRsummary::to_R()
   }
   else
   {
-    hmin = ihistogram.begin()->first;
+    hmin = ihistogram.empty() ? 0 : ihistogram.begin()->first;
     hmax = hmin;
     nbins = 1;
   }
