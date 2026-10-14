@@ -92,18 +92,30 @@ test_that("independent LAS and LAZ writers preserve each acquisition",
   })
 })
 
-test_that("directories and virtual point clouds expand into independent jobs",
+test_that("directories expand into one independent job per file",
+{
+  with_independent_file_fixture(function(files, root)
+  {
+    ans <- exec(summarise(metrics = "z_mean"), dirname(files[1]),
+                independent_files = TRUE, ncores = sequential())
+    expect_equal(ans$npoints, 18)
+    # Directory enumeration order is platform dependent.
+    expect_equal(sort(ans$metrics$z_mean), c(3, 103))
+  })
+})
+
+test_that("virtual point clouds preserve their explicit file order",
 {
   with_independent_file_fixture(function(files, root)
   {
     vpc <- file.path(root, "surveys.vpc")
-    exec(write_vpc(vpc), files, ncores = sequential())
-    for (input in c(dirname(files[1]), vpc))
+    for (file_order in list(seq_along(files), rev(seq_along(files))))
     {
-      ans <- exec(summarise(metrics = "z_mean"), input,
+      exec(write_vpc(vpc), files[file_order], ncores = sequential())
+      ans <- exec(summarise(metrics = "z_mean"), vpc,
                   independent_files = TRUE, ncores = sequential())
       expect_equal(ans$npoints, 18)
-      expect_equal(ans$metrics$z_mean, c(3, 103))
+      expect_equal(ans$metrics$z_mean, c(3, 103)[file_order])
     }
   })
 })
