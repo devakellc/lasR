@@ -15,7 +15,9 @@ The `lasr` library (pronounced "laser") is a C++ library for large scale airborn
 Supported pipelines that write one file per chunk can use checkpoints to resume
 interrupted processing of local point clouds. Completed chunks are checked and
 reused, while unfinished chunks are processed again. See the
-[checkpoint and resume guide](docs/checkpoint-resume.md) for examples and limits.
+[checkpoint and resume guide][checkpoint-guide] for examples and limits.
+
+[checkpoint-guide]: https://github.com/devakellc/lasR/blob/main/vignettes/checkpoint-resume.Rmd
 
 💵 [Sponsor `lasr`](https://github.com/sponsors/Jean-Romain). It is free and open source, but requires time and effort to develop and maintain.
 

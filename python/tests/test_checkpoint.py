@@ -54,6 +54,13 @@ class TestCheckpoint(unittest.TestCase):
         self.assertEqual(len(writers), 1)
         return writers[0]
 
+    def assert_same_files(self, actual, expected):
+        self.assertEqual(len(actual), len(expected))
+        for actual_path, expected_path in zip(actual, expected):
+            # MSYS2 Python and C++ use different Windows path separators.
+            self.assertTrue(os.path.samefile(actual_path, expected_path),
+                            f"{actual_path!r} does not identify {expected_path!r}")
+
     @staticmethod
     def snapshot(paths, age=False):
         snapshots = {}
@@ -85,8 +92,8 @@ class TestCheckpoint(unittest.TestCase):
     def test_complete_resume_preserves_results_and_outputs(self):
         files = self.make_inputs()
         first = self.written_files(self.pipeline().execute(files))
-        self.assertEqual(first, [str(self.outputs / f"tile_{i:02d}.laz")
-                                 for i in range(len(files))])
+        self.assert_same_files(first, [self.outputs / f"tile_{i:02d}.laz"
+                                       for i in range(len(files))])
         original = self.snapshot(first, age=True)
         self.assertEqual(len(list((self.state / "completed").glob("*.json"))), 3)
 
@@ -271,7 +278,7 @@ print("UNEXPECTED_WRITE_SUCCESS", flush=True)
         # Success also proves that killing the child released its lock.
         resumed = self.written_files(self.pipeline(resume=True).execute(files))
         expected = [str(self.outputs / f"tile_{i:02d}.laz") for i in range(len(files))]
-        self.assertEqual(resumed, expected)
+        self.assert_same_files(resumed, expected)
         self.assertEqual(self.snapshot(completed_outputs), original)
         self.assertEqual(len(list(completed_dir.glob("*.json"))), len(files))
         # These copies overlap completely: normal spatial-collection semantics

@@ -9,8 +9,7 @@ src/Makevars
 config*
 proj_conf_test*
 inst/doc
-docs/*
-!docs/checkpoint-resume.md
+docs
 /doc/
 /Meta/
 bin

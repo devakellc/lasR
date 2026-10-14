@@ -20,7 +20,7 @@ The LASR Python bindings provide a clean, Pythonic interface to the powerful LAS
 - **Remote Data Access**: Stream data from HTTP, S3, Azure, GCS via GDAL virtual filesystems; COPC and EPT support efficient spatial queries over the network
 - **Checkpoint and Resume**: Reuse completed chunks of supported local pipelines
   that write separate output files; see the
-  [checkpoint guide](../docs/checkpoint-resume.md).
+  [checkpoint guide](../vignettes/checkpoint-resume.Rmd).
 
 ## Installation
 
@@ -149,8 +149,9 @@ This initial scope supports local LAS/LAZ/COPC/PCD inputs and local VPC catalogs
 Callbacks, summaries or other in-memory results, external raster/matrix inputs,
 random sampling, shared output files, and tree stages with shared identifiers
 are unsupported. Inputs and existing completed outputs are checksummed on each
-start, which adds disk I/O. See the [complete guide](../docs/checkpoint-resume.md)
-for supported stages, path requirements, and filesystem limits.
+start, which adds disk I/O. See the
+[complete guide](../vignettes/checkpoint-resume.Rmd) for supported stages, path
+requirements, and filesystem limits.
 
 ## Available Stages
 

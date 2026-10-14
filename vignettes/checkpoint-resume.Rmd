@@ -1,4 +1,17 @@
-# Checkpoint and resume
+---
+title: "Checkpoint and resume"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{8. Checkpoint and resume}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
 
 Checkpointing lets supported pipelines resume after a process interruption.
 Completed chunks with intact output files are reused; unfinished chunks run
@@ -106,8 +119,9 @@ result = make_pipeline(resume=True).execute(inputs)
 ```
 
 The normal Python result object contains all ordered output paths, including
-those reused from previous executions. See the [Python API](../python/README.md)
-for other pipeline methods.
+those reused from previous executions. See the
+[Python API](https://github.com/devakellc/lasR/tree/main/python) for other pipeline
+methods.
 
 In C++, the equivalent method is
 `Pipeline::set_checkpoint(const std::string& path, bool resume = false)`:
