@@ -631,6 +631,11 @@ json make_plan(const json& config, Report& report)
     {"buffer", processing.value("buffer", 0.0)}, {"chunk", processing.value("chunk", 0.0)},
     {"concurrent_files", (strategy == "concurrent-files" || strategy == "nested") ? ncores[0] : 1},
     {"concurrent_points", strategy == "nested" ? ncores[1] : strategy == "concurrent-points" ? ncores[0] : 1}};
+  // Checkpoint/resume is an optional companion feature. Inspect the whole
+  // declared pipeline without reading or changing saved job state; never
+  // certify its additional admission and resume checks as part of this plan.
+  if (!processing.value("checkpoint", "").empty() || processing.value("resume", false))
+    report.add("deferred", "checkpoint_validation_deferred", "Checkpoint admission and saved resume state are checked by execution, not by this plan; listed chunks describe the full pipeline");
   if (!check_structure(stages, report)) return report.finish();
 
   // Remote readers may probe point payloads (notably EPT), so do not open them

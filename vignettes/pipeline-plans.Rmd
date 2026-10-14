@@ -206,6 +206,13 @@ must not be interpreted as a successful check simply because no error was
 found. Planning is independent of execution and does not create a resumable
 job or validate a saved execution state.
 
+In builds that also provide checkpoint/resume, supplying those execution
+options adds a deferred `checkpoint_validation_deferred` diagnostic. The plan
+is incomplete unless another error makes it invalid. Listed chunks describe
+the full pipeline, including chunks that a resumed run might reuse. Planning
+does not read or change checkpoint state; execution checks checkpoint
+eligibility and saved resume state.
+
 ## Python
 
 `Pipeline.plan(files=None)` and `Pipeline.validate(files=None)` return the same

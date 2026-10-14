@@ -86,24 +86,6 @@ pipeline.set_concurrent_files_strategy(2)
 result = pipeline.execute(["file1.las", "file2.las"])
 ```
 
-### Processing Strategies
-
-LASR supports different parallelization strategies:
-
-```python
-# Sequential processing
-pipeline.set_sequential_strategy()
-
-# Concurrent points (single file, multiple cores)
-pipeline.set_concurrent_points_strategy(ncores=4)
-
-# Concurrent files (multiple files, single core each)
-pipeline.set_concurrent_files_strategy(ncores=2)
-
-# Nested strategy (multiple files, multiple cores each)
-pipeline.set_nested_strategy(ncores1=2, ncores2=4)
-```
-
 ### Pipeline Validation and Execution Plans
 
 Inspect a pipeline before processing points or creating output files:
@@ -133,6 +115,24 @@ or reserve output paths. Review diagnostics and execute with the same inputs
 and settings. See the
 [complete planning guide](../vignettes/pipeline-plans.Rmd) for checked conditions,
 limitations, and R examples.
+
+### Processing Strategies
+
+LASR supports different parallelization strategies:
+
+```python
+# Sequential processing
+pipeline.set_sequential_strategy()
+
+# Concurrent points (single file, multiple cores)
+pipeline.set_concurrent_points_strategy(ncores=4)
+
+# Concurrent files (multiple files, single core each)
+pipeline.set_concurrent_files_strategy(ncores=2)
+
+# Nested strategy (multiple files, multiple cores each)
+pipeline.set_nested_strategy(ncores1=2, ncores2=4)
+```
 
 ## Available Stages
 
