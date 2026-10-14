@@ -14,8 +14,10 @@ public:
   LASRsummary();
   bool process(Point*& p) override;
   bool process(PointCloud*& las) override;
+  bool process_empty() override;
   bool is_streamable() const override { return !metrics_engine.active(); }
   bool set_parameters(const nlohmann::json&) override;
+  bool set_chunk(Chunk& chunk) override;
   std::string get_name() const override { return "summary"; }
 
   // multi-threading
@@ -42,6 +44,7 @@ private:
   AttributeAccessor get_classification;
   AttributeAccessor get_number_of_returns;
   void reset_accessors();
+  void record_metrics();
 
   uint64_t npoints;
   uint64_t nsingle;
@@ -55,6 +58,8 @@ private:
   std::map<int, uint64_t> zhistogram;
   std::map<int, uint64_t> ihistogram;
   std::map<std::string, std::vector<float>> metrics;
+  int chunk_id = 0;
+  std::vector<int> metric_chunk_ids;
 
   MetricManager metrics_engine;
   PointCollection cloud;

@@ -206,8 +206,9 @@ bool Engine::run_loaded()
 {
   bool success;
 
-  for (auto&& stage : pipeline)
+  for (auto stage_it = pipeline.begin(); stage_it != pipeline.end(); ++stage_it)
   {
+    auto& stage = *stage_it;
     if (Progress::interrupted())
     {
       last_error = "Execution interrupted. Output files have been created on disk with partial results and were not cleaned.";
@@ -253,6 +254,15 @@ bool Engine::run_loaded()
     if (npoints == 0)
     {
       order.pop_back();
+      for (auto remaining = stage_it; remaining != pipeline.end(); ++remaining)
+      {
+        if ((*remaining)->break_pipeline()) break;
+        if (!(*remaining)->process_empty())
+        {
+          last_error = "in '" + (*remaining)->get_name() + "' while processing an empty point cloud: " + last_error;
+          return false;
+        }
+      }
       for (auto&& stage : pipeline) stage->reset_filter();
       return true;
     }

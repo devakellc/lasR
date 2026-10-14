@@ -1,5 +1,9 @@
 # lasR 0.21.2
 
+- Fix: summaries retain rows for loaded chunks emptied by preceding stages.
+  Empty metrics are missing values, with zero counts, instead of raster nodata.
+- Fix: summary metrics remain ordered and safe when a later stage removes
+  all points from a chunk, including height normalization without ground points.
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

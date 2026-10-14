@@ -2,6 +2,10 @@
 #include "openmp.h"
 
 #include <iterator>
+#include <algorithm>
+#include <numeric>
+#include <limits>
+#include <cmath>
 
 LASRsummary::LASRsummary()
 {
@@ -9,6 +13,7 @@ LASRsummary::LASRsummary()
   nsingle = 0;
   nwithheld = 0;
   nsynthetic = 0;
+  metrics_engine.set_default_value(std::numeric_limits<float>::quiet_NaN());
 
   get_synthetic = AttributeAccessor("Synthetic");
   get_withheld = AttributeAccessor("Withheld");
@@ -28,7 +33,15 @@ bool LASRsummary::set_parameters(const nlohmann::json& stage)
 
   if (!metrics_engine.parse(metrics, false)) return false;
 
+  for (const auto& name : metrics) this->metrics[name] = {};
+
   return true;
+}
+
+bool LASRsummary::set_chunk(Chunk& chunk)
+{
+  chunk_id = chunk.id;
+  return Stage::set_chunk(chunk);
 }
 
 bool LASRsummary::process(Point*& p)
@@ -72,19 +85,35 @@ bool LASRsummary::process(PointCloud*& las)
     process(p);
   }
 
+  record_metrics();
+
+  return true;
+}
+
+bool LASRsummary::process_empty()
+{
+  record_metrics();
+  return true;
+}
+
+void LASRsummary::record_metrics()
+{
   if (metrics_engine.active())
   {
+    metric_chunk_ids.push_back(chunk_id);
     for (int i = 0 ; i < metrics_engine.size() ; i++)
     {
       const std::string& name = metrics_engine.get_name(i);
       float val = metrics_engine.get_metric(i, cloud);
+      size_t separator = name.find('_');
+      std::string function = separator == std::string::npos ? name : name.substr(separator + 1);
+      if (cloud.empty() && function == "count") val = 0;
       metrics[name].push_back(val);
     }
 
     cloud.clear();
   }
 
-  return true;
 }
 
 void LASRsummary::merge(const Stage* other)
@@ -104,6 +133,7 @@ void LASRsummary::merge(const Stage* other)
 
   if (metrics_engine.active())
   {
+    metric_chunk_ids.insert(metric_chunk_ids.end(), o->metric_chunk_ids.begin(), o->metric_chunk_ids.end());
     for (const auto& pair : o->metrics)
     {
       const std::string& key = pair.first;
@@ -113,12 +143,21 @@ void LASRsummary::merge(const Stage* other)
   }
 }
 
-void LASRsummary::sort(const std::vector<int>& order)
+void LASRsummary::sort(const std::vector<int>&)
 {
+  // A later stage can empty a chunk and remove it from the engine's order.
+  // Order only the chunks that actually contributed a row to this summary.
+  std::vector<size_t> order(metric_chunk_ids.size());
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(), [this](size_t a, size_t b)
+  {
+    return metric_chunk_ids[a] < metric_chunk_ids[b];
+  });
+
   for (auto& pair : metrics)
   {
     std::vector<float> ordered(pair.second.size());
-    for (size_t i = 0 ; i < pair.second.size() ; i++) ordered[order[i]] = pair.second[i];
+    for (size_t i = 0 ; i < pair.second.size() ; i++) ordered[i] = pair.second[order[i]];
     pair.second.swap(ordered);
   }
 }
@@ -205,7 +244,7 @@ SEXP LASRsummary::to_R()
   }
   else
   {
-    hmin = zhistogram.begin()->first;
+    hmin = zhistogram.empty() ? 0 : zhistogram.begin()->first;
     hmax = hmin;
     nbins = 1;
   }
@@ -231,7 +270,7 @@ SEXP LASRsummary::to_R()
   }
   else
   {
-    hmin = ihistogram.begin()->first;
+    hmin = ihistogram.empty() ? 0 : ihistogram.begin()->first;
     hmax = hmin;
     nbins = 1;
   }
@@ -286,7 +325,7 @@ SEXP LASRsummary::to_R()
       const std::vector<float>& data = kv.second;
 
       SEXP vec = PROTECT(Rf_allocVector(REALSXP, nrows)); nsexpprotected++;
-      for (int i = 0; i < nrows; ++i) {  REAL(vec)[i] = data[i]; }
+      for (int i = 0; i < nrows; ++i) { REAL(vec)[i] = std::isnan(data[i]) ? NA_REAL : data[i]; }
 
       SET_STRING_ELT(colnames, colIdx, Rf_mkChar(name.c_str()));
       SET_VECTOR_ELT(df, colIdx, vec);
