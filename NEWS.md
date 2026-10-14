@@ -1,5 +1,7 @@
 # lasR 0.21.2
 
+- Fix: VPC output declares the point cloud extension version 2, which supports
+  its point count and type without requiring encoding or per-dimension schemas.
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1
