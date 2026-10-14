@@ -10,6 +10,7 @@ set_exec_options(
   progress = NULL,
   buffer = NULL,
   chunk = NULL,
+  independent_files = NULL,
   ...
 )
 
@@ -29,6 +30,17 @@ pick the greatest value between the internal suggestion and this value.}
 \item{chunk}{numeric. By default, the collection of files is processed by file (\code{chunk = NULL} or \code{chunk = 0}).
 It is possible to process in arbitrary-sized chunks. This is useful for e.g., processing collections
 with large files or processing a massive \code{copc} file.}
+
+\item{independent_files}{logical. If \code{TRUE}, each input file is a separate job and no points from
+other files are read, even when their extents overlap. The default is \code{FALSE}: files are treated
+as spatial tiles and may read overlapping files or neighbours. Independent jobs can still use
+\code{concurrent_files()} or \code{nested()} processing. Automatic buffering is disabled, so algorithms
+may show edge effects at file boundaries. Requires file input, \code{buffer = 0}, \code{chunk = 0}, and a
+coverage reader (the default); circle and rectangle readers are incompatible. For a \code{LAScatalog},
+set its chunk size and buffer to zero. Directories and virtual point clouds are expanded into
+separate file jobs. Reader filters and depth limits still apply. Use a writer path containing
+\code{*}, such as \code{"output/*.laz"}, for one output per input file; input basenames must be distinct.
+Summary totals and writers without \code{*} retain their usual aggregation across jobs.}
 
 \item{...}{Other internal options not exposed to users.}
 }

@@ -84,6 +84,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
 
   bool reader = false;
   bool indexer = false;
+  bool independent_files = false;
 
   parsed = false;
   pipeline.clear();
@@ -166,7 +167,19 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
         // stage tells us 50.
         buffer = stage.value("buffer", 0.0);
         chunk_size = stage.value("chunk", 0.0);
+        independent_files = stage.value("independent_files", false);
         std::string type = stage.value("type", "files");
+
+        if (independent_files && (buffer != 0 || chunk_size != 0))
+        {
+          last_error = "independent_files requires buffer = 0 and chunk = 0";
+          return false;
+        }
+        if (independent_files && type != "files")
+        {
+          last_error = "independent_files requires file input";
+          return false;
+        }
 
         // We are processing some files. Otherwise with have a compatibility layer
         // with lidR to process LAS objects
@@ -180,6 +193,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
             last_error = "In the parser while reading the file collection: " + last_error; // # nocov
             return false; // # nocov
           }
+          catalog->set_independent_files(independent_files);
 
           if (stage.contains("noprocess"))
           {
@@ -252,6 +266,12 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
       }
       else if (name == "reader")
       {
+        if (independent_files && (stage.contains("xcenter") || stage.contains("xmin")))
+        {
+          last_error = "independent_files cannot be combined with spatial-query readers";
+          return false;
+        }
+
         if (reader)
         {
           last_error = "The pipeline can only have a single reader stage";

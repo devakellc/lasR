@@ -454,6 +454,8 @@ bool Engine::need_points() const
 
 double Engine::need_buffer()
 {
+  if (catalog && catalog->get_independent_files()) return 0;
+
   for (auto&& stage : pipeline)
   {
     if (!stage->is_streamable())

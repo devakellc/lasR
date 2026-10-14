@@ -177,6 +177,7 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   // Initialize with default values
   double buffer = 0.0;
   double chunk = 0.0;
+  bool independent_files = false;
   bool verbose = false;
   bool progress = true;
   std::string strategy = "concurrent-points";
@@ -196,6 +197,7 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   // Apply updates
   update_if_present(buffer, "buffer");
   update_if_present(chunk, "chunk");
+  update_if_present(independent_files, "independent_files");
   update_if_present(verbose, "verbose");
   update_if_present(progress, "progress");
   update_if_present(strategy, "strategy");
@@ -215,6 +217,7 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   p.set_buffer(buffer);
   p.set_progress(progress);
   p.set_chunk(chunk);
+  p.set_independent_files(independent_files);
   p.set_profile_file("");
   p.set_noprocess(noprocess);
   p.set_log_file(log_file);

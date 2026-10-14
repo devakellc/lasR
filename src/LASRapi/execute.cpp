@@ -71,7 +71,7 @@ ReturnType execute(const std::string& config_file)
   std::string strategy = processing_options.value("strategy", "concurrent-points");
   bool progrss = processing_options.value("progress", true);
   bool verbose = processing_options.value("verbose", false);
-  double chunk_size = processing_options.value("chunk", 0);
+  double chunk_size = processing_options.value("chunk", 0.0);
 
   // Optional log files
   std::string progress_file = processing_options.value("progress_file", "");
@@ -116,6 +116,12 @@ ReturnType execute(const std::string& config_file)
     };
     json_pipeline.insert(json_pipeline.begin(), build_catalog);
   }
+
+  bool independent_files = processing_options.value("independent_files",
+      json_pipeline[0].value("independent_files", false));
+  if (independent_files && (processing_options.value("buffer", 0.0) != 0 || chunk_size != 0))
+    throw std::invalid_argument("independent_files requires buffer = 0 and chunk = 0");
+  json_pipeline[0]["independent_files"] = independent_files;
 
   // Check some multithreading stuff
   if (ncpu[0] > available_threads())

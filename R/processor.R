@@ -4,6 +4,11 @@
 #' called on a pipeline in order to actually process the point-cloud. To process in parallel using
 #' multiple cores, refer to the \link{multithreading} page.
 #'
+#' By default, files are treated as spatial tiles: overlapping files and neighbours needed for
+#' buffering may contribute points to each job. For separate acquisitions of the same area, use
+#' `with = list(independent_files = TRUE)` to process each file using only its own points.
+#' See [set_exec_options()] for restrictions and output naming.
+#'
 #' @param pipeline a pipeline. A serie of stages called in order
 #' @param on Can be the paths of the files to use, the path of the folder in which the files are stored,
 #' the path to a [virtual point cloud](https://www.lutraconsulting.co.uk/blog/2023/06/08/virtual-point-clouds/)
@@ -186,6 +191,7 @@ parse_options = function(on, with, ...)
   # Default
   buffer <- 0
   chunk <- 0
+  independent_files <- FALSE
   progress <- FALSE
   ncores <- if (has_omp_support()) concurrent_points(half_cores()) else sequential()
   noprocess <- NULL
@@ -198,6 +204,7 @@ parse_options = function(on, with, ...)
   # Explicit options
   if (!is.null(dots[["buffer"]])) buffer <- dots[["buffer"]]
   if (!is.null(dots[["chunk"]]))  chunk <- dots[["chunk"]]
+  if (!is.null(dots[["independent_files"]])) independent_files <- dots[["independent_files"]]
   if (!is.null(dots[["progress"]])) progress <- dots[["progress"]]
   if (!is.null(dots[["ncores"]])) ncores <- dots[["ncores"]]
   if (!is.null(dots[["noprocess"]])) noprocess <- dots[["noprocess"]]
@@ -210,6 +217,7 @@ parse_options = function(on, with, ...)
   # 'with' list has precedence
   if (!is.null(with[["buffer"]])) buffer <- with[["buffer"]]
   if (!is.null(with[["chunk"]]))  chunk <- with[["chunk"]]
+  if (!is.null(with[["independent_files"]])) independent_files <- with[["independent_files"]]
   if (!is.null(with[["progress"]])) progress <- with[["progress"]]
   if (!is.null(with[["ncores"]]))  ncores <- with[["ncores"]]
   if (!is.null(with[["noprocess"]])) noprocess <- with[["noprocess"]]
@@ -253,6 +261,7 @@ parse_options = function(on, with, ...)
   # Global options have precedence on everything
   if (!is.null(LASROPTIONS[["buffer"]])) buffer <- LASROPTIONS[["buffer"]]
   if (!is.null(LASROPTIONS[["chunk"]]))  chunk <- LASROPTIONS[["chunk"]]
+  if (!is.null(LASROPTIONS[["independent_files"]])) independent_files <- LASROPTIONS[["independent_files"]]
   if (!is.null(LASROPTIONS[["progress"]])) progress <- LASROPTIONS[["progress"]]
   if (!is.null(LASROPTIONS[["ncores"]])) ncores <- LASROPTIONS[["ncores"]]
   if (!is.null(LASROPTIONS[["strategy"]])) mode <- LASROPTIONS[["strategy"]]
@@ -270,6 +279,10 @@ parse_options = function(on, with, ...)
 
   stopifnot(is.numeric(buffer))
   stopifnot(is.numeric(chunk))
+  stopifnot(is.logical(independent_files), length(independent_files) == 1L,
+            !is.na(independent_files))
+  if (independent_files && (buffer != 0 || chunk != 0))
+    stop("independent_files requires buffer = 0 and chunk = 0")
   stopifnot(is.logical(progress))
   stopifnot(is.numeric(ncores))
   stopifnot(is.character(mode))
@@ -286,6 +299,7 @@ parse_options = function(on, with, ...)
     progress = progress,
     noprocess = noprocess,
     chunk = chunk,
+    independent_files = independent_files,
     noread = noread,
     verbose = verbose,
     profile_file = profile_file,
@@ -338,22 +352,37 @@ parse_options = function(on, with, ...)
 #' @param chunk numeric. By default, the collection of files is processed by file (`chunk = NULL` or `chunk = 0`).
 #' It is possible to process in arbitrary-sized chunks. This is useful for e.g., processing collections
 #' with large files or processing a massive `copc` file.
+#' @param independent_files logical. If `TRUE`, each input file is a separate job and no points from
+#' other files are read, even when their extents overlap. The default is `FALSE`: files are treated
+#' as spatial tiles and may read overlapping files or neighbours. Independent jobs can still use
+#' `concurrent_files()` or `nested()` processing. Automatic buffering is disabled, so algorithms
+#' may show edge effects at file boundaries. Requires file input, `buffer = 0`, `chunk = 0`, and a
+#' coverage reader (the default); circle and rectangle readers are incompatible. For a `LAScatalog`,
+#' set its chunk size and buffer to zero. Directories and virtual point clouds are expanded into
+#' separate file jobs. Reader filters and depth limits still apply. Use a writer path containing
+#' `*`, such as `"output/*.laz"`, for one output per input file; input basenames must be distinct.
+#' Summary totals and writers without `*` retain their usual aggregation across jobs.
 #' @param ... Other internal options not exposed to users.
 #' @seealso [multithreading]
 #' @export
 #' @md
-set_exec_options = function(ncores = NULL, progress = NULL, buffer = NULL, chunk = NULL, ...)
+set_exec_options = function(ncores = NULL, progress = NULL, buffer = NULL, chunk = NULL,
+                            independent_files = NULL, ...)
 {
   if (!is.null(ncores)) stopifnot(is.numeric(ncores))
   if (!is.null(progress)) stopifnot(is.logical(progress))
   if (!is.null(buffer)) stopifnot(is.numeric(buffer))
   if (!is.null(chunk)) stopifnot(is.numeric(chunk))
+  if (!is.null(independent_files))
+    stopifnot(is.logical(independent_files), length(independent_files) == 1L,
+              !is.na(independent_files))
 
   set_parallel_strategy(ncores)
 
   dots <- list(...)
   LASROPTIONS$progress <- progress
   LASROPTIONS$chunk <- chunk
+  LASROPTIONS$independent_files <- independent_files
   LASROPTIONS$buffer <- buffer
   LASROPTIONS$noread <- dots$noread
   LASROPTIONS$noprocess <- dots$noprocess
@@ -366,6 +395,7 @@ unset_exec_option = function()
 {
   LASROPTIONS$progress <- NULL
   LASROPTIONS$chunk <- NULL
+  LASROPTIONS$independent_files <- NULL
   LASROPTIONS$buffer <- NULL
   LASROPTIONS$noread <- NULL
   LASROPTIONS$noprocess <- NULL

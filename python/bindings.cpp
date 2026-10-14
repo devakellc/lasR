@@ -204,6 +204,8 @@ PYBIND11_MODULE(pylasr, m) {
         .def("set_buffer", &api::Pipeline::set_buffer, "Set buffer size", py::arg("buffer"))
         .def("set_progress", &api::Pipeline::set_progress, "Set progress display", py::arg("progress"))
         .def("set_chunk", &api::Pipeline::set_chunk, "Set chunk size", py::arg("chunk"))
+        .def("set_independent_files", &api::Pipeline::set_independent_files,
+             "Process each input file separately without neighbours or buffering", py::arg("independent_files"))
         .def("set_profile_file", &api::Pipeline::set_profile_file, "Set profiling output file", py::arg("path"))
         .def("set_noprocess", &api::Pipeline::set_noprocess, "Set no-process flags", py::arg("noprocess"))
         .def("has_reader", &api::Pipeline::has_reader, "Check if pipeline has a reader stage")
