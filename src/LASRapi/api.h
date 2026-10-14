@@ -154,6 +154,7 @@ public:
   void set_buffer(double val) { opt_buffer = val; };
   void set_progress(bool b) { opt_progress = b; };
   void set_chunk(double val) { if(val> 0) opt_chunk = val; };
+  void set_independent_files(bool b) { opt_independent_files = b; };
   void set_profile_file(const std::string& path) { opt_profiling_file = path; };
   void set_progress_file(const std::string& path) { opt_progress_file = path; };
   void set_log_file(const std::string& path) { opt_log_file = path; };
@@ -178,6 +179,7 @@ private:
   double opt_buffer = 0;
   bool opt_progress = false;
   double opt_chunk = 0;
+  bool opt_independent_files = false;
   bool opt_verbose = false;
   std::vector<bool> opt_noprocess;
   std::string opt_profiling_file = "";

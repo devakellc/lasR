@@ -37,6 +37,8 @@ public:
   bool write_vpc(const std::string& file, const CRS& crs, bool absolute_path, bool use_gpstime);
   bool is_source_vpc() { return use_vpc; };
   void set_buffer(double buffer) { this->buffer = buffer; };
+  void set_independent_files(bool value) { independent_files = value; };
+  bool get_independent_files() const { return independent_files; };
   void add_query(double xmin, double ymin, double xmax, double ymax);
   void add_query(double xcenter, double ycenter, double radius);
   bool set_noprocess(const std::vector<bool>& b);
@@ -92,6 +94,7 @@ private:
   // overall parameter to process
   double buffer;
   double chunk_size;
+  bool independent_files;
 
   // information about each file
   std::vector<Header> headers;

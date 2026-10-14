@@ -173,6 +173,11 @@ nlohmann::json Pipeline::generate_json() const
     }
   }
 
+  // This also covers catalogs injected by the R compatibility layer.
+  for (auto& stage : p.stages)
+    if (stage.get_name() == "build_catalog")
+      stage.set("independent_files", opt_independent_files);
+
   // Construct the output JSON
   nlohmann::json j;
 
@@ -182,6 +187,7 @@ nlohmann::json Pipeline::generate_json() const
   j["processing"]["buffer"]    = opt_buffer;
   j["processing"]["progress"]  = opt_progress;
   j["processing"]["chunk"]     = opt_chunk;
+  j["processing"]["independent_files"] = opt_independent_files;
   j["processing"]["verbose"]   = opt_verbose;
   j["processing"]["profile_file"] = opt_profiling_file;
   j["processing"]["progress_file"] = opt_progress_file;

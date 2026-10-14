@@ -1,5 +1,8 @@
 # lasR 0.21.2
 
+- New: `independent_files` processing option isolates overlapping acquisitions
+  while retaining parallel file processing. Available through R execution
+  options, the C++/Python pipeline setter, and JSON processing options (#234).
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

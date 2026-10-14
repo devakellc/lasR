@@ -26,6 +26,12 @@ Process the pipeline. Every other functions of the package do nothing. This func
 called on a pipeline in order to actually process the point-cloud. To process in parallel using
 multiple cores, refer to the \link{multithreading} page.
 }
+\details{
+By default, files are treated as spatial tiles: overlapping files and neighbours needed for
+buffering may contribute points to each job. For separate acquisitions of the same area, use
+\code{with = list(independent_files = TRUE)} to process each file using only its own points.
+See \code{\link[=set_exec_options]{set_exec_options()}} for restrictions and output naming.
+}
 \examples{
 \dontrun{
 f <- paste0(system.file(package="lasR"), "/extdata/bcts/")

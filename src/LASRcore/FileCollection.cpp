@@ -779,9 +779,9 @@ bool FileCollection::get_chunk_regular(int i, Chunk& chunk) const
     chunk.name = "data.frame";
   }
 
-  // We are working with an R data.frame: there is no file and especially
-  // no neighbouring files. We can exit now.
-  if (use_dataframe)
+  // An independent file job must never load points from another acquisition.
+  // An R data.frame likewise has no neighbouring files.
+  if (use_dataframe || independent_files)
   {
     return true;
   }
@@ -947,6 +947,7 @@ void FileCollection::clear()
 
   buffer = 0;
   chunk_size = 0;
+  independent_files = false;
 
   headers.clear();
   noprocess.clear();

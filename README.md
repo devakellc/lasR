@@ -126,6 +126,29 @@ std::string file = p.write_json();
 return execute(file);
 ```
 
+### Independent files
+
+By default, files form a spatial collection: a job can read overlapping files
+and neighbouring points needed for buffering. To keep separate acquisitions of
+the same area independent while processing files in parallel:
+
+```r
+pipeline <- write_las("output/*.laz")
+exec(pipeline, on = c("survey_2023.las", "survey_2024.las"),
+     with = list(independent_files = TRUE, ncores = concurrent_files(2)))
+```
+
+In Python or C++, call `pipeline.set_independent_files(True)` or
+`pipeline.set_independent_files(true)` respectively. JSON configurations accept
+`"independent_files": true` in `processing`.
+
+This option creates one job per input file, with no neighbours or automatic
+buffering. It requires zero buffer and chunk size and a coverage reader; circle
+and rectangle queries are incompatible. Filters and depth limits still apply.
+Algorithms can have edge effects at file boundaries. Use `*` in output paths
+and distinct input basenames for separate outputs. Summary totals and writers
+without `*` still aggregate the jobs.
+
 ## Main Differences with `lidR`
 
 The following benchmark compares the time and RAM usage of `lasR` (R API) and `lidR` for producing a Digital Terrain Model (DTM), a Canopy Height Model (CHM), and a raster containing two metrics derived from elevation (Z) and intensity. The test was conducted on 120 million points stored in 4 LAZ files. For more details, check out the [benchmark vignette](https://r-lidar.github.io/lasR/articles/benchmarks.html).

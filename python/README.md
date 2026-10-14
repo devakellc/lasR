@@ -104,6 +104,26 @@ pipeline.set_concurrent_files_strategy(ncores=2)
 pipeline.set_nested_strategy(ncores1=2, ncores2=4)
 ```
 
+### Independent files
+
+Files normally form a spatial collection, so overlapping inputs and neighbours
+can contribute points to a job. For independent acquisitions of the same area:
+
+```python
+pipeline = pylasr.write_las("output/*.laz")
+pipeline.set_independent_files(True)
+pipeline.set_concurrent_files_strategy(2)
+result = pipeline.execute(["survey_2023.las", "survey_2024.las"])
+```
+
+Each file supplies one job without neighbours or automatic buffering. Leave
+buffer and chunk size at zero and use the default coverage reader; circle and
+rectangle readers are incompatible. Algorithms may have edge effects at file
+boundaries. Reader filters and depth limits still apply. Use `*` in writer paths
+and distinct input basenames for separate outputs. Summary totals and writers
+without `*` still aggregate jobs. Directory and VPC inputs expand into file jobs.
+JSON configurations accept `"independent_files": true` in `processing`.
+
 ## Available Stages
 
 ### Input/Reading
