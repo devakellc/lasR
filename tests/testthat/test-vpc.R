@@ -33,6 +33,33 @@ test_that("vpc writer works",
   expect_equal(as.numeric(sf::st_bbox(ans)), c(-127.627836098, 50.665469135, -127.624899322, 50.675051675))
 })
 
+test_that("VPC pointcloud v2 metadata preserves relative and absolute round trips",
+{
+  file = system.file("extdata", "MixedConifer.las", package = "lasR")
+  expected = exec(summarise(), on = file, progress = FALSE)
+  folder = tempfile("vpc-pointcloud-v2-")
+  dir.create(folder)
+  on.exit(unlink(folder, recursive = TRUE))
+
+  for (absolute_path in c(FALSE, TRUE))
+  {
+    output = file.path(folder, paste0(absolute_path, ".vpc"))
+    exec(write_vpc(output, absolute_path = absolute_path), on = file,
+         progress = FALSE)
+    metadata = readLines(output, warn = FALSE)
+    expect_true(any(grepl("https://stac-extensions.github.io/pointcloud/v2.0.0/schema.json",
+                          metadata, fixed = TRUE)))
+    expect_false(any(grepl("https://stac-extensions.github.io/pointcloud/v1.0.0/schema.json",
+                           metadata, fixed = TRUE)))
+    properties = sf::st_read(output, quiet = TRUE)
+    expect_equal(properties$pc.count, expected$npoints)
+    expect_equal(properties$pc.type, "lidar")
+
+    actual = exec(summarise(), on = output, progress = FALSE)
+    expect_equal(actual, expected)
+  }
+})
+
 file.remove(f)
 
 test_that("vpc reader fails",

@@ -473,7 +473,7 @@ bool FileCollection::write_vpc(const std::string& vpcfile, const CRS& crs, bool 
     output << "    \"type\": \"Feature\"," << std::endl;
     output << "    \"stac_version\": \"1.0.0\"," << std::endl;
     output << "    \"stac_extensions\": [" << std::endl;
-    output << "      \"https://stac-extensions.github.io/pointcloud/v1.0.0/schema.json\"," << std::endl;
+    output << "      \"https://stac-extensions.github.io/pointcloud/v2.0.0/schema.json\"," << std::endl;
     output << "      \"https://stac-extensions.github.io/projection/v1.1.0/schema.json\"" << std::endl;
     output << "     ]," << std::endl;
     output << "    \"id\": " << autoquote(id) << "," << std::endl;
