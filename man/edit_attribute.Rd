@@ -12,7 +12,8 @@ interest. For a given stage when a filter is applied, only the points that meet 
 The most common strings are \verb{Classification == 2"}, \code{"Z > 2"}, \code{"Intensity < 100"}. For more details see
 \link{filters}.}
 
-\item{attribute}{string. The name of an attribute to edit}
+\item{attribute}{string. The name of an attribute to edit. It must exist in
+each non-empty input chunk; otherwise processing stops with an error.}
 
 \item{value}{numeric. The value to assign. Be careful, if the user try to assign a value out of
 range of representable value for a given data type it will be clamped.}
