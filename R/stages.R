@@ -438,7 +438,8 @@ delete_ground = function() { delete_points(keep_ground()) }
 #'
 #' Edit an attribute of the points by filtering the point based on criteria.
 #' @template param-filter
-#' @param attribute string. The name of an attribute to edit
+#' @param attribute string. The name of an attribute to edit. It must exist in
+#' each non-empty input chunk; otherwise processing stops with an error.
 #' @param value numeric. The value to assign. Be careful, if the user try to assign a value out of
 #' range of representable value for a given data type it will be clamped.
 #' @export

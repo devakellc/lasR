@@ -1,5 +1,7 @@
 # lasR 0.21.2
 
+- Fix: `edit_attribute()` consistently reports missing edit targets in loaded
+  pipelines and rechecks the target for each input chunk (#243).
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

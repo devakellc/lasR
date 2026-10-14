@@ -30,7 +30,8 @@ bool LASRedit::process(PointCloud*& las)
   while(las->read_point())
   {
     Point* p = &las->point;
-    process(p);
+    if (!process(p))
+      return false;
   }
 
   return true;
@@ -53,5 +54,6 @@ bool LASRedit::set_parameters(const nlohmann::json& stage)
 
 void LASRedit::clear(bool last)
 {
+  first = true;
   accessor.reset();
 }
