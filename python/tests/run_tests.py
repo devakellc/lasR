@@ -57,6 +57,7 @@ def run_all_tests():
     test_modules = [
         'test_basic_import',
         'test_pipeline', 
+        'test_plan',
         'test_functions',
         'test_integration'
     ]

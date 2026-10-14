@@ -1,0 +1,244 @@
+---
+title: "Pipeline validation and execution plans"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{9. Pipeline validation and execution plans}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## Inspect a pipeline before execution
+
+An execution plan describes the stages, input metadata, processing settings,
+chunks, and output paths that can be determined before processing starts. It
+also checks for problems such as missing attributes, incompatible coordinate
+systems, and output paths that collide with one another or with an input.
+
+Planning reads available metadata. It does not process the point cloud, run
+callbacks, create outputs or spatial indexes, or change the supplied pipeline.
+It does not create a temporary pipeline JSON file, log, or progress file.
+
+```r
+library(lasR)
+
+input <- system.file("extdata", "Example.las", package = "lasR")
+pipeline <- summarise(metrics = c("z_max", "i_mean", "count"))
+
+report <- pipeline_plan(pipeline, on = input, ncores = sequential())
+report
+report$stages
+report$processing
+report$chunks
+report$diagnostics
+```
+
+Use the same inputs and processing options when planning and executing. R
+options have the same precedence as `exec()`: global settings override
+`LAScatalog` settings, which override `with`, which overrides named arguments
+in `...`.
+
+```r
+options <- list(buffer = 0, ncores = concurrent_files(2))
+report <- validate_pipeline(pipeline, on = input, with = options)
+
+if (identical(report$status, "valid")) {
+  result <- exec(pipeline, on = input, with = options)
+}
+```
+
+`validate_pipeline()` returns the same report as `pipeline_plan()`. Set
+`stop_on_error = TRUE` to raise an R error when the report is invalid. An
+incomplete report does not raise an error, so a workflow that requires complete
+inspection should explicitly check `status` as in the example above.
+
+## Understand the result
+
+The report has `schema_version = 1`. In R, it is a list of class
+`lasr_pipeline_plan`. In Python, it is a dictionary. Arrays are lists in both
+interfaces, including arrays with one element.
+
+| Status | `valid` in R / Python | Meaning |
+| --- | --- | --- |
+| `valid` | `TRUE` / `True` | The supported checks completed without errors or deferred checks. Warnings may remain. |
+| `invalid` | `FALSE` / `False` | At least one error was found. Other checks may also be deferred. |
+| `incomplete` | `NULL` / `None` | No error was found, but some checks could not be completed. |
+
+`scope` distinguishes pipeline-only inspection (`"pipeline"`) from inspection
+of supplied inputs (`"inputs"`). Without input metadata, attribute availability,
+input bounds, and chunk-specific paths remain unknown. A pipeline-only plan
+without detected errors is incomplete.
+
+```r
+report <- pipeline_plan(pipeline)
+report$status  # "incomplete"
+report$valid   # NULL
+report$chunks  # NULL
+```
+
+A valid report is a metadata and configuration check. It cannot establish that
+the data contain enough ground points for a triangulation, that a filter will
+leave any points, or that runtime memory and disk space will be sufficient.
+It does not reserve output paths or protect against changes made after
+inspection. Keep inputs and execution settings unchanged, and still handle
+errors from `exec()` or `execute()`.
+
+## Read diagnostics
+
+Each diagnostic contains `severity`, `code`, and `message`. When applicable, it
+also identifies `stage_index`, `stage`, `input`, or `attribute`. Stage indices
+start at one. Use codes for programmatic selection and messages for explanation.
+
+| Severity | Interpretation |
+| --- | --- |
+| `error` | A known configuration or metadata problem must be corrected. |
+| `warning` | Execution may proceed, but the condition needs review. |
+| `deferred` | The planner cannot establish the result without more information or execution. |
+
+For example, a metric referencing an unavailable attribute is an error. The
+check follows stage order, so an earlier `add_extrabytes()` makes the new
+attribute available, while removing it makes later uses invalid.
+
+```r
+missing <- summarise(metrics = "HAG_mean")
+validate_pipeline(missing, on = input)$diagnostics
+
+prepared <- add_extrabytes("double", "HAG", "Height above ground") +
+  edit_attribute(attribute = "HAG", value = 0) +
+  summarise(metrics = "HAG_mean")
+validate_pipeline(prepared, on = input)$status
+```
+
+Adding a field and filling it with zero in this example demonstrates schema
+availability; it does not compute height above ground. The planner checks
+attribute requirements in supported metrics, filters, and stages against each
+available input schema. A field present in one file does not establish its
+presence in every file.
+
+Known mixed coordinate reference systems are errors. Missing CRS information
+and geographic coordinates used by distance or grid operations produce
+warnings. Review coordinate units yourself: a projected CRS can use feet, and
+assigning a CRS with `set_crs()` does not transform coordinates or establish a
+height datum.
+
+## Inspect buffers, parallelism, and outputs
+
+`processing$requested` and `processing$effective` describe the supplied and
+adjusted settings. Both include `buffer`, `chunk`, `strategy`, `ncores`,
+`concurrent_files`, and `concurrent_points`. The engine can increase a buffer to
+meet a stage's declared minimum and adjust parallelism for the available
+threads, stage capabilities, and number of chunks.
+
+```r
+pipeline <- triangulate() + write_las(file.path(tempdir(), "surface_*.las"))
+report <- pipeline_plan(pipeline, on = input, buffer = 0,
+                        ncores = concurrent_files(2))
+report$processing$requested
+report$processing$effective
+report$outputs
+```
+
+A stage's declared buffer is not proof that every data-dependent neighborhood
+is complete. The plan reports the buffer the engine will use; algorithm and
+data requirements still need review. Some combinations are known to be
+incompatible, such as PCD output with a nonzero effective buffer, and are
+reported as errors.
+
+When input bounds are known, `chunks` lists their order, names, bounds, buffer,
+main files, neighbor files, and processing flags. Unknown chunks are `NULL` in
+R and `None` in Python. Each output entry describes its stage, filename
+template, mode, and planned paths. Empty or conditionally skipped chunks may
+produce no files at execution time.
+
+Inspection limits a generated chunk grid to 100,000 cells. A finer grid yields
+a deferred `plan_limit` diagnostic instead of allocating an unbounded plan.
+Increase the chunk size or inspect a smaller input selection to obtain the
+chunk details.
+
+The planner expands supported output templates and normalizes local paths to
+check collisions. Two input tiles with the same filename stem can expand a
+wildcard output to the same destination. Two stages writing to one path, or an
+output overwriting an input, are errors. One merged writer may intentionally
+use the same destination across chunks. Existing output files produce overwrite
+warnings, and a missing parent directory is an error. Planning does not create
+directories or truncate existing files.
+
+Shapefile companion paths (`.shx`, `.dbf`, `.prj`, and `.cpg`) also participate
+in collision checks. Other GDAL drivers can create auxiliary files that are
+not listed as primary destinations; review format-specific diagnostics and
+avoid sharing their destination directories with unrelated writers.
+
+## Know what remains deferred
+
+Inspection is most complete for local LAS, LAZ, and COPC inputs with available
+headers and supported built-in stages. It also accepts the input forms supported
+by the R interface, but incomplete metadata is reported explicitly.
+
+For R in-memory inputs (`data.frame`, `LAS`, or `lasrcloud`), positive chunk
+sizes are unsupported and produce an invalid plan; execution also rejects
+that configuration. Use file inputs when you need to divide the work into
+chunks. The regular data-frame reader uses the full input extent and reports
+its actual chunk buffer of zero, even when a larger processing buffer was
+requested.
+
+- Planning never invokes callbacks or user-defined R raster expressions. Their
+  behavior cannot be certified by a plan. R raster stage construction may
+  evaluate an expression to infer its output width; planning does not evaluate
+  it again.
+- Remote inputs and EPT datasets are not downloaded or traversed for planning.
+  Their uninspected schemas and bounds remain deferred.
+- VPC catalogs do not by themselves establish the schemas of all referenced
+  files. Schema-dependent checks remain deferred in this version.
+- PCD headers may lack bounds. Planning does not scan the payload to create a
+  `.bbox` sidecar; unknown geometry remains deferred.
+- LASlib filters written with dash-prefixed options have semantics that this
+  version does not fully inspect. The report remains incomplete.
+- Point-dependent results, resource availability during execution, and the
+  correctness of user-selected processing parameters remain outside the plan.
+
+Read the actual diagnostics for each pipeline. An unsupported or opaque step
+must not be interpreted as a successful check simply because no error was
+found. Planning is independent of execution and does not create a resumable
+job or validate a saved execution state.
+
+## Python
+
+`Pipeline.plan(files=None)` and `Pipeline.validate(files=None)` return the same
+report dictionary. Omitting `files` uses the pipeline's configured inputs.
+Supplying files overrides them for inspection only; it does not change the
+pipeline. Strings, directories, and iterables of path-like objects follow the
+same input conventions as `execute()`.
+
+```python
+from pathlib import Path
+import pylasr
+
+files = [Path("tiles/tile1.laz"), Path("tiles/tile2.laz")]
+pipeline = (
+    pylasr.classify_with_sor()
+    + pylasr.delete_points(["Classification == 18"])
+    + pylasr.write_las("results/clean_*.laz")
+)
+pipeline.set_concurrent_files_strategy(2)
+
+report = pipeline.plan(files)
+print(report["status"])
+print(report["processing"])
+for diagnostic in report["diagnostics"]:
+    print(diagnostic["severity"], diagnostic["code"], diagnostic["message"])
+
+# Review warnings and ensure the output directory exists before execution.
+if report["status"] == "valid":
+    result = pipeline.execute(files)
+```
+
+Python validation returns an invalid report for known pipeline configuration
+errors; it does not automatically raise on that status. Incorrect host-language
+arguments can still raise an exception. See the
+[Python API documentation](https://github.com/devakellc/lasR/tree/main/python)
+for pipeline construction and execution.

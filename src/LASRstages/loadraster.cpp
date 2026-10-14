@@ -6,9 +6,9 @@ bool LASRloadraster::set_parameters(const nlohmann::json& stage)
   band = stage.value("band", 1);
 
   raster.set_file(ifile);
-  if (!raster.read_file())
+  if (!raster.read_file(inspection, band))
   {
-    last_error = "failed to read raster file " + ifile;
+    last_error = "failed to read raster file " + ifile + (inspection ? ": " + last_error : "");
     return false;
   }
 
@@ -16,7 +16,7 @@ bool LASRloadraster::set_parameters(const nlohmann::json& stage)
 
   bool overlap =  !(xmin >= bbox[2] || xmax <= bbox[0] || ymin >= bbox[3] || ymax <= bbox[1]);
 
-  if (!overlap)
+  if (!overlap && !(inspection && !inspection_has_extent))
   {
     last_error = "the raster and the point-cloud have non overlaping bounding boxes";
     return false;

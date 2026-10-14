@@ -62,17 +62,29 @@ py::object create_result(const nlohmann::json& json_results, const std::string& 
 
 // Helper: normalize Python argument 'files' into std::vector<std::string>
 static std::vector<std::string> normalize_files_arg(const py::object& files) {
-      std::vector<std::string> file_vec;
-      if (py::isinstance<py::str>(files)) {
-            file_vec.push_back(files.cast<std::string>());
-      } else if (py::isinstance<py::list>(files) || py::isinstance<py::tuple>(files)) {
-            for (auto item : py::iter(files)) {
-                  file_vec.push_back(py::cast<std::string>(item));
-            }
-      } else {
-            throw std::invalid_argument("files must be a string or a list/tuple of strings");
-      }
-      return file_vec;
+    std::vector<std::string> file_vec;
+    py::object os = py::module_::import("os");
+    auto append_path = [&](const py::handle& item) {
+        py::object path = os.attr("fspath")(item);
+        if (!py::isinstance<py::str>(path))
+            throw py::type_error("files paths must be strings or PathLike objects returning strings");
+        file_vec.push_back(path.cast<std::string>());
+    };
+
+    if (py::isinstance<py::str>(files) || py::isinstance(files, os.attr("PathLike"))) {
+        append_path(files);
+    } else {
+        if (py::isinstance<py::bytes>(files) || PyByteArray_Check(files.ptr()) || py::isinstance<py::dict>(files))
+            throw py::type_error("files must be a string, PathLike object, or iterable of paths");
+        for (auto item : py::iter(files)) append_path(item);
+    }
+    return file_vec;
+}
+
+static py::object inspect_pipeline(const api::Pipeline& self, const py::object& files) {
+    api::Pipeline pipeline(self);
+    if (!files.is_none()) pipeline.set_files(normalize_files_arg(files));
+    return py::module_::import("json").attr("loads")(pipeline.plan().dump());
 }
 
 
@@ -132,7 +144,7 @@ PYBIND11_MODULE(pylasr, m) {
 
       m.def("execute", [](api::Pipeline& pipeline, py::object files) -> py::object {
             try {
-                // Normalize 'files' to a vector of strings (accept str or list/tuple of str)
+                // Accept a text path, a PathLike object, or an iterable of paths.
                 std::vector<std::string> file_vec = normalize_files_arg(files);
 
                 // Make a copy of the pipeline and set files (similar to R API approach)
@@ -153,7 +165,7 @@ PYBIND11_MODULE(pylasr, m) {
                 throw py::value_error("Execution failed: unknown error");
             }
       },
-            "Execute a pipeline with specified files (str or list[str]) (mimics R API: exec(pipeline, on=files))",
+            "Execute a pipeline with specified paths (str, PathLike, or iterable of paths) (mimics R API: exec(pipeline, on=files))",
             py::arg("pipeline"),
             py::arg("files"));
 
@@ -210,9 +222,17 @@ PYBIND11_MODULE(pylasr, m) {
         .def("has_catalog", &api::Pipeline::has_catalog, "Check if pipeline has a catalog")
         .def("to_string", &api::Pipeline::to_string, "Get string representation")
         .def("write_json", &api::Pipeline::write_json, "Write pipeline to JSON file", py::arg("path") = "")
+        .def("plan", &inspect_pipeline,
+             "Inspect a pipeline without executing it or creating outputs. "
+             "Returns a report dict; files=None preserves configured inputs.",
+             py::arg("files") = py::none())
+        .def("validate", &inspect_pipeline,
+             "Return the pipeline validation report without executing it. "
+             "Invalid configurations are reported in status and diagnostics.",
+             py::arg("files") = py::none())
         .def("execute", [](api::Pipeline& self, py::object files) -> py::object {
             try {
-                // Normalize 'files' to a vector of strings (accept str or list/tuple of str)
+                // Accept a text path, a PathLike object, or an iterable of paths.
                 std::vector<std::string> file_vec = normalize_files_arg(files);
 
                 self.set_files(file_vec);
@@ -230,7 +250,7 @@ PYBIND11_MODULE(pylasr, m) {
                 // Catch-all for non-std exceptions
                 throw py::value_error("Execution failed: unknown error");
             }
-        }, "Execute the pipeline on files (str or list[str]) and return results", py::arg("files"));
+        }, "Execute the pipeline on paths (str, PathLike, or iterable of paths) and return results", py::arg("files"));
 
     // ==== STAGE CREATION FUNCTIONS ====
     // Following the exact C++ API signatures

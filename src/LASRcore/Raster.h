@@ -13,7 +13,7 @@ public:
   Raster(const Raster& raster);
   Raster(const Raster& raster, const Chunk& chunk);
   bool is_na(float x) const { return std::isnan(x) || x == nodata; }
-  bool read_file();
+  bool read_file(bool inspection = false, int band_index = 1);
   void set_value(double x, double y, float value, int layer = 1);
   void set_value(int cell, float value, int layer = 1);
   bool set_nbands(int nbands);

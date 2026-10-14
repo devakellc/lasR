@@ -18,6 +18,10 @@ The `lasr` library (pronounced "laser") is a C++ library for large scale airborn
 
 - 📖 Start with the [tutorial](https://r-lidar.github.io/lasR/articles/tutorial.html) to learn how to use `lasR` in R.
 - 🐍 For Python users, see the [Python documentation](https://github.com/r-lidar/lasR/tree/main/python) and [examples](https://github.com/r-lidar/lasR/tree/main/python/examples).
+- Inspect stages, inputs, buffers, and output paths before execution with
+  [pipeline validation and execution plans](https://github.com/devakellc/lasR/blob/main/vignettes/pipeline-plans.Rmd).
+  Reports distinguish detected errors from checks that need more information,
+  without processing points or creating outputs.
 
 The most comprehensive source of documentation is the [R package `lasR` documentation](https://r-lidar.github.io/lasR/),  
 as `lasr` is primarily an R package. Even Python users should start with the [R tutorial](https://r-lidar.github.io/lasR/), while the examples are written in R, the tutorial is more about the general concepts than about coding.

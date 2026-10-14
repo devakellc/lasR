@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <limits>
+#include <cmath>
 
 #include "Engine.h"
 #include "FileCollection.h"
@@ -71,8 +72,41 @@ static std::unique_ptr<Stage> create_instance()
   return std::make_unique<T>();
 }
 
-bool Engine::parse(const nlohmann::json& json, bool progress)
+static bool inspection_extent_valid(double xmin, double ymin, double xmax, double ymax)
 {
+  return std::isfinite(xmin) && std::isfinite(ymin) &&
+         std::isfinite(xmax) && std::isfinite(ymax) &&
+         xmin <= xmax && ymin <= ymax;
+}
+
+static bool inspection_grid_valid(double xmin, double ymin, double xmax, double ymax, double res)
+{
+  if (!std::isfinite(res) || res <= 0) return false;
+
+  // Mirror Grid's rounding using doubles before it converts dimensions to int.
+  double left = std::round((xmin - 0.5 * res) / res) * res;
+  double right = std::round((xmax - 0.5 * res) / res) * res + res;
+  double bottom = std::round((ymin - 0.5 * res) / res) * res;
+  double top = std::round((ymax - 0.5 * res) / res) * res + res;
+  double ncols = std::round((right - left) / res);
+  double nrows = std::round((top - bottom) / res);
+  double cells = nrows * ncols;
+  return std::isfinite(ncols) && std::isfinite(nrows) && std::isfinite(cells) &&
+         ncols >= 1 && nrows >= 1 && cells <= std::numeric_limits<int>::max();
+}
+
+bool Engine::parse(const nlohmann::json& json, bool progress, bool inspection)
+{
+  this->inspection = inspection;
+  if (inspection)
+  {
+    clean();
+    catalog.reset();
+    buffer = 0;
+    chunk_size = 0;
+    point_cloud_ownership_transfered = false;
+  }
+
   int num_stages = json.size();
 
   // This is the extent of the coverage.
@@ -175,9 +209,10 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
           std::vector<std::string> files = get_vector<std::string>(stage["files"]);
 
           catalog = std::make_shared<FileCollection>();
-          if (!catalog->read(files, progress))
+          if (!catalog->read(files, progress, inspection))
           {
-            last_error = "In the parser while reading the file collection: " + last_error; // # nocov
+            if (!inspection || last_error.rfind("Inspection metadata unavailable:", 0) != 0)
+              last_error = "In the parser while reading the file collection: " + last_error; // # nocov
             return false; // # nocov
           }
 
@@ -192,10 +227,13 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
           }
 
           // The catalog read all the files, we now know the extent of the coverage
-          xmin = catalog->get_xmin();
-          ymin = catalog->get_ymin();
-          xmax = catalog->get_xmax();
-          ymax = catalog->get_ymax();
+          if (!inspection || catalog->has_complete_bounds())
+          {
+            xmin = catalog->get_xmin();
+            ymin = catalog->get_ymin();
+            xmax = catalog->get_xmax();
+            ymax = catalog->get_ymax();
+          }
         }
         #ifdef USING_R
         else if (type == "dataframe")
@@ -204,6 +242,67 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
           SEXP dataframe = string_address_to_sexp(address_dataframe_str);
 
           std::string wkt = stage.at("crs");
+
+          if (inspection)
+          {
+            if (TYPEOF(dataframe) != VECSXP || Rf_xlength(dataframe) < 3)
+            {
+              last_error = "Dataframe input must contain X, Y and Z coordinate columns";
+              return false;
+            }
+            SEXP names = Rf_getAttrib(dataframe, R_NamesSymbol);
+            if (TYPEOF(names) != STRSXP || Rf_xlength(names) != Rf_xlength(dataframe))
+            {
+              last_error = "Dataframe input must have named columns";
+              return false;
+            }
+            SEXP coordinates[3] = {R_NilValue, R_NilValue, R_NilValue};
+            for (R_xlen_t k = 0; k < Rf_xlength(names); ++k)
+            {
+              if (STRING_ELT(names, k) == NA_STRING) continue;
+              std::string name = CHAR(STRING_ELT(names, k));
+              int axis = (name == "X") ? 0 : (name == "Y") ? 1 : (name == "Z") ? 2 : -1;
+              if (axis < 0) continue;
+              if (coordinates[axis] != R_NilValue)
+              {
+                last_error = "Dataframe coordinate column names must be unique";
+                return false;
+              }
+              coordinates[axis] = VECTOR_ELT(dataframe, k);
+            }
+            if (TYPEOF(coordinates[0]) != REALSXP || TYPEOF(coordinates[1]) != REALSXP ||
+                (TYPEOF(coordinates[2]) != REALSXP && TYPEOF(coordinates[2]) != INTSXP))
+            {
+              last_error = "Dataframe input requires double X and Y columns and a numeric Z column";
+              return false;
+            }
+            R_xlen_t count = Rf_xlength(coordinates[0]);
+            if (count == 0 || count > std::numeric_limits<int>::max())
+            {
+              last_error = "Dataframe coordinates must have a nonzero supported row count";
+              return false;
+            }
+            for (R_xlen_t k = 0; k < Rf_xlength(dataframe); ++k)
+            {
+              if (Rf_xlength(VECTOR_ELT(dataframe, k)) != count)
+              {
+                last_error = "Dataframe columns must have equal lengths";
+                return false;
+              }
+            }
+            for (SEXP coordinate : coordinates)
+            {
+              for (R_xlen_t k = 0; k < count; ++k)
+              {
+                bool finite = TYPEOF(coordinate) == REALSXP ? std::isfinite(REAL(coordinate)[k]) : INTEGER(coordinate)[k] != NA_INTEGER;
+                if (!finite)
+                {
+                  last_error = "Dataframe coordinates must be finite and nonmissing";
+                  return false;
+                }
+              }
+            }
+          }
 
           // Compute the bounding box. We assume that the data.frame has element named X and Y.
           // This is not checked at R level. Anyway get_element() will throw an exception
@@ -230,6 +329,8 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
           std::string address_ptr = stage.at("externalptr");
           SEXP sexplas = string_address_to_sexp(address_ptr);
           las = static_cast<PointCloud*>(R_ExternalPtrAddr(sexplas));
+          // Inspection borrows the cloud even if parsing stops before the reader.
+          if (inspection) point_cloud_ownership_transfered = true;
           if (las == nullptr)
           {
             last_error = "invalid external pointer";
@@ -383,13 +484,19 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
             }
           }
 
-          if (has_valid_query)
+          if (has_valid_query && (!inspection || catalog->has_complete_bounds()))
           {
             xmin = temp_xmin;
             ymin = temp_ymin;
             xmax = temp_xmax;
             ymax = temp_ymax;
           }
+        }
+        else if (inspection)
+        {
+          // A reader with no inputs still has meaningful stage capabilities.
+          // No file is opened until its execution-only set_chunk() method.
+          pipeline.push_back(std::make_unique<LASRlasreader>());
         }
       }
       else if (name  == "region_growing")
@@ -441,6 +548,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
         it->set_uid(uid);
         it->set_ncpu(ncpu);
         it->set_verbose(verbose);
+        it->set_inspection(inspection, catalog && catalog->has_complete_bounds());
         it->set_extent(xmin, ymin, xmax, ymax);
 
         if (stage.contains("connect"))
@@ -450,13 +558,55 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
           if (!b) return false;
         }
 
+        if (inspection)
+        {
+          if ((name == "reader" || name == "reader_las") && catalog && catalog->get_format() == DATAFRAME)
+          {
+            const auto accuracy = get_vector<double>(stage.at("accuracy"));
+            if (accuracy.size() != 3 || std::any_of(accuracy.begin(), accuracy.end(), [](double value) { return !std::isfinite(value) || value < 0; }))
+            {
+              last_error = "Dataframe coordinate accuracy must contain three finite nonnegative values";
+              return false;
+            }
+          }
+
+          if (!inspection_extent_valid(xmin, ymin, xmax, ymax))
+          {
+            last_error = "Invalid input extent for stage " + it->get_name();
+            return false;
+          }
+
+          if (name == "rasterize" || name == "aggregate" || name == "spikefree")
+          {
+            double res = (name == "spikefree") ? stage.value("res", 1.0) : stage.at("res").get<double>();
+            if (!inspection_grid_valid(xmin, ymin, xmax, ymax, res))
+            {
+              last_error = "Invalid raster grid in stage " + it->get_name() +
+                           ": resolution must be finite and positive, and grid dimensions must fit in an integer";
+              return false;
+            }
+          }
+        }
+
         if (!it->set_parameters(stage))
         {
           last_error = "Invalid parameters in stage " + it->get_name() + ": " + last_error;
           return false;
         }
 
+        if (inspection && (!std::isfinite(it->need_buffer()) || it->need_buffer() < 0))
+        {
+          last_error = "Invalid required buffer in stage " + it->get_name() + ": buffer must be finite and nonnegative";
+          return false;
+        }
+
         it->get_extent(xmin, ymin, xmax, ymax);
+
+        if (inspection && !inspection_extent_valid(xmin, ymin, xmax, ymax))
+        {
+          last_error = "Invalid output extent from stage " + it->get_name();
+          return false;
+        }
 
         // If we intend to actually process the point cloud we check that a reader stage is present if needed
         if (catalog != nullptr && it->need_points() && !reader)
@@ -474,29 +624,45 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
     // but can't be executed and won't be executed. This happens only in get_pipeline_info()
     // that parses the pipeline in order to know if a buffer is needed or if the pipeline is
     // streamable.
-    if (catalog != nullptr)
+    if (catalog != nullptr || inspection)
     {
-      if (!reader)
+      if (catalog != nullptr && !reader)
       {
         last_error = "The pipeline must have a readers stage";
         return false;
       }
 
-      num_stages--;
-      catalog->set_buffer(need_buffer()); // We parsed the pipeline so we know if we need a buffer
-      //catalog->build_index(); // The catalog is built, we have the bbox of all the LAS files. We can build a spatial index
-      if (!catalog->set_chunk_size(chunk_size)) return false;
+      if (catalog != nullptr)
+      {
+        num_stages--;
+        catalog->set_inspection(inspection);
+        // We parsed the pipeline so we know if we need a buffer.
+        const double effective_buffer = need_buffer();
+        if (inspection && (!std::isfinite(effective_buffer) || effective_buffer < 0 ||
+            (catalog->has_complete_bounds() &&
+             (!std::isfinite(catalog->get_xmin() - effective_buffer) ||
+              !std::isfinite(catalog->get_ymin() - effective_buffer) ||
+              !std::isfinite(catalog->get_xmax() + effective_buffer) ||
+              !std::isfinite(catalog->get_ymax() + effective_buffer)))))
+        {
+          last_error = "Invalid effective buffer: buffer and expanded input bounds must be finite";
+          return false;
+        }
+        catalog->set_buffer(effective_buffer);
+        // Missing metadata must not be replaced by a fabricated chunk grid.
+        if ((!inspection || catalog->has_complete_bounds()) && !catalog->set_chunk_size(chunk_size)) return false;
+      }
 
       // We iterate over all the stage again to assign the filter, the crs and the output file.
       // This is done here because set_output_file() does create a file on disk and we want
       // it to happen only if we plan to actually process something
-      CRS current_crs = catalog->get_crs();
+      CRS current_crs = catalog ? catalog->get_crs() : CRS();
       auto it = pipeline.begin();
       int i = 0;
       for (auto& [key, stage] : json.items())
       {
         // Skip first stage that is build_catalog
-        if (i == 0)
+        if ((!inspection && i == 0) || (inspection && stage.value("algoname", "") == "build_catalog"))
         {
           i++;
           continue;
@@ -527,7 +693,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
 
         std::string output = stage.value("output", "");
 
-        if (catalog->file_exists(output))
+        if (!inspection && catalog && catalog->file_exists(output))
         {
           last_error = "Cannot override a file used as a source of point-cloud: " + output;
           return false;
@@ -549,7 +715,7 @@ bool Engine::parse(const nlohmann::json& json, bool progress)
 
       // Write lax is the very first stage. Even before read_las. It is called
       // only if needed.
-      if (!catalog->check_spatial_index() && !indexer && catalog->get_format() == LASFILE)
+      if (!inspection && catalog && !catalog->check_spatial_index() && !indexer && catalog->get_format() == LASFILE)
       {
         bool onthefly = catalog->get_number_files() > 1;
         auto v = std::make_unique<LASRlaxwriter>(false, false, onthefly);

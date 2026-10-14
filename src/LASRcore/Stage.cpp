@@ -11,6 +11,8 @@ Stage::Stage()
   xmax = 0;
   ymax = 0;
   verbose = false;
+  inspection = false;
+  inspection_has_extent = true;
   circular = false;
   progress = nullptr;
   ncpu = 1;
@@ -31,6 +33,8 @@ Stage::Stage(const Stage& other)
   ymax = other.ymax;
   circular = other.circular;
   verbose = other.verbose;
+  inspection = other.inspection;
+  inspection_has_extent = other.inspection_has_extent;
   ifile = other.ifile;
   uid = other.uid;
   progress = other.progress;
@@ -255,6 +259,7 @@ bool StageRaster::set_input_file_name(const std::string& file)
   {
     ofile.replace(pos, 1, ifile);
     raster.set_file(ofile);
+    if (inspection) return true;
     if (!raster.create_file()) return false;
     written.push_back(ofile);
   }
@@ -275,6 +280,7 @@ bool StageRaster::set_output_file(const std::string& file)
   {
     merged = true;
     raster.set_file(file);
+    if (inspection) return true;
     if (!raster.create_file()) return false;
     written.push_back(file);
   }
@@ -350,6 +356,7 @@ bool StageVector::set_input_file_name(const std::string& file)
   {
     ofile.replace(pos, 1, ifile);
     vector.set_file(ofile);
+    if (inspection) return true;
     if (!vector.create_file()) return false;
     written.push_back(ofile);
   }
@@ -367,6 +374,7 @@ bool StageVector::set_output_file(const std::string& file)
   {
     merged = true;
     vector.set_file(file);
+    if (inspection) return true;
     if (!vector.create_file()) return false;
     written.push_back(file);
   }

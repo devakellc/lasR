@@ -105,6 +105,7 @@ public:
   void set_ncpu(int ncpu) { this->ncpu = ncpu; }
   void set_ncpu_concurrent_files(int ncpu) { this->ncpu_concurrent_files = ncpu; }
   void set_verbose(bool verbose) { this->verbose = verbose; };
+  void set_inspection(bool enabled, bool has_extent = true) { inspection = enabled; inspection_has_extent = has_extent; };
   void set_uid(std::string s) { uid = s; };
   void set_filter(const std::vector<std::string>& f);
   //void set_filter(const std::string& f);
@@ -153,6 +154,8 @@ protected:
   double buffer;
   bool circular;
   bool verbose;
+  bool inspection;
+  bool inspection_has_extent;
   CRS crs;
   std::string ifile;
   std::string ofile;

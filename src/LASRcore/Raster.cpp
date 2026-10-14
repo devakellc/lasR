@@ -76,7 +76,7 @@ Raster::Raster(const Raster& raster, const Chunk& chunk) : Grid (chunk.xmin, chu
   set_chunk(chunk); // #15 resize the grid including the buffer
 }
 
-bool Raster::read_file()
+bool Raster::read_file(bool inspection, int band_index)
 {
   if (!GDALdataset::read_file())
   {
@@ -89,13 +89,37 @@ bool Raster::read_file()
     return false;
   }
 
+  if (inspection)
+  {
+    if (band_index < 1 || band_index > dataset->GetRasterCount())
+    {
+      last_error = "Requested raster band is outside the available band range";
+      return false;
+    }
+
+    double cells = static_cast<double>(nXsize) * nYsize;
+    bool finite_transform = true;
+    for (double value : geo_transform)
+      finite_transform = finite_transform && std::isfinite(value);
+
+    double right = geo_transform[0] + nXsize * geo_transform[1];
+    double bottom = geo_transform[3] + nYsize * geo_transform[5];
+    if (nXsize <= 0 || nYsize <= 0 || cells > std::numeric_limits<int>::max() ||
+        !finite_transform || geo_transform[1] <= 0 || geo_transform[5] >= 0 ||
+        !std::isfinite(right) || !std::isfinite(bottom))
+    {
+      last_error = "Raster metadata has invalid bounds, resolution, or grid dimensions";
+      return false;
+    }
+  }
+
   // Multiple band reading not supported yet
   nBands = 1;
 
   // Compute Grid members
   ncols = nXsize;
   nrows = nYsize;
-  ncells = ncols*nrows*ncells;
+  ncells = inspection ? ncols*nrows : ncols*nrows*ncells;
   xres = geo_transform[1];
   yres = geo_transform[5]*-1;
   xmin = geo_transform[0];

@@ -33,9 +33,10 @@ class FileCollection
 public:
   FileCollection();
   ~FileCollection();
-  bool read(const std::vector<std::string>& files, bool progress = false);
+  bool read(const std::vector<std::string>& files, bool progress = false, bool inspection = false);
   bool write_vpc(const std::string& file, const CRS& crs, bool absolute_path, bool use_gpstime);
   bool is_source_vpc() { return use_vpc; };
+  void set_inspection(bool inspection) { this->inspection = inspection; };
   void set_buffer(double buffer) { this->buffer = buffer; };
   void add_query(double xmin, double ymin, double xmax, double ymax);
   void add_query(double xcenter, double ycenter, double radius);
@@ -54,6 +55,8 @@ public:
   void set_crs(const CRS& crs) { this->crs = crs; };
   CRS get_crs() const { return crs; };
   const std::vector<std::filesystem::path>& get_files() const;
+  const std::vector<Header>& get_headers() const { return headers; };
+  bool has_complete_bounds() const;
   bool check_spatial_index();
   void set_all_indexed();
   void clear();
@@ -88,6 +91,7 @@ private:
   // reader mode to support R data.frame
   bool use_dataframe;
   bool use_vpc;
+  bool inspection = false;
 
   // overall parameter to process
   double buffer;
