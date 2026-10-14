@@ -1321,6 +1321,10 @@ summarise = function(zwbin = 2, iwbin = 50, metrics = NULL, filter = "")
 #' application. This stage is typically used as an intermediate process without an output file.
 #' This stage does not modify the point cloud.
 #'
+#' The triangulation retains the coordinates and `use_attribute` values present when this stage
+#' runs. Later stages can reuse it after editing, sorting, or deleting points. To build a surface
+#' from the modified point cloud, add a new `triangulate()` stage after those changes.
+#'
 #' @param max_edge numeric. Maximum edge length of a triangle in the Delaunay triangulation. If a
 #' triangle has an edge length greater than this value, it will be removed. If max_edge = 0, no trimming
 #' is done (see examples).

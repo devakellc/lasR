@@ -37,6 +37,11 @@ Thus, it is discouraged to store them in formats with no 3D support, such as sha
 application. This stage is typically used as an intermediate process without an output file.
 This stage does not modify the point cloud.
 }
+\details{
+The triangulation retains the coordinates and \code{use_attribute} values present when this stage
+runs. Later stages can reuse it after editing, sorting, or deleting points. To build a surface
+from the modified point cloud, add a new \code{triangulate()} stage after those changes.
+}
 \examples{
 f <- system.file("extdata", "Topography.las", package="lasR")
 read <- reader()
