@@ -1,0 +1,243 @@
+# Checkpoint and resume
+
+Checkpointing lets supported pipelines resume after a process interruption.
+Completed chunks with intact output files are reused; unfinished chunks run
+again. It is intended for deterministic pipelines that read local point clouds
+and write separate files for each chunk.
+
+This initial implementation does not resume arbitrary pipelines or preserve
+partially processed points inside a chunk. It records completion at chunk
+boundaries.
+
+## Start and resume in R
+
+Choose a new job location outside the directory being processed. Create the
+output directory, but leave the checkpoint directory absent. Use stable output
+paths with exactly one `*` in each filename; the engine replaces it with the
+chunk name.
+
+```r
+library(lasR)
+
+inputs <- "/data/tiles"
+job <- "/data/cleaned-job"
+outputs <- file.path(job, "outputs")
+dir.create(outputs, recursive = TRUE, showWarnings = FALSE)
+checkpoint <- file.path(job, "checkpoint")  # Do not create this directory.
+
+make_pipeline <- function() {
+  classify_with_sor(k = 10) +
+    delete_noise() +
+    write_las(file.path(outputs, "*.laz"))
+}
+
+run_job <- function(resume = FALSE) {
+  exec(make_pipeline(), on = inputs, with = list(
+    checkpoint = checkpoint,
+    resume = resume,
+    ncores = concurrent_files(2),
+    noread = TRUE
+  ))
+}
+
+files <- run_job()
+
+# After an interruption, use the same definitions and existing directories.
+files <- run_job(resume = TRUE)
+```
+
+You can rebuild these definitions in a new R session. Reconstructing equivalent
+stages creates new internal identifiers, but those identifiers do not invalidate
+the checkpoint. The input paths, output patterns, stage settings, processing
+strategy, and core counts must stay the same.
+
+The options can also be passed directly to `exec()`:
+
+```r
+files <- exec(make_pipeline(), on = inputs, checkpoint = checkpoint,
+              resume = TRUE, ncores = concurrent_files(2), noread = TRUE)
+```
+
+`checkpoint = ""` disables checkpointing. `resume` defaults to `FALSE`, and
+`resume = TRUE` requires an existing checkpoint. Global settings made with
+`set_exec_options()` override per-call settings; use `unset_exec_option()` to
+clear them when the job is finished.
+
+With `noread = TRUE`, R returns file paths, including paths from chunks completed
+in earlier executions. A single output stage returns a character vector;
+multiple output stages return a named list of vectors. Paths follow the chunk
+plan order, regardless of completion order. With the default `noread = FALSE`,
+the usual R conversion of raster and vector files still applies.
+
+An empty chunk gets a completion record without an invented output file. Its
+absence from the returned paths does not mean it remains unfinished. In R, a
+job that produces no files returns `NULL`.
+
+## Start and resume in Python
+
+Use `Pipeline.set_checkpoint(path, resume=False)` before executing the pipeline.
+The same path and compatibility rules apply to all language bindings.
+
+```python
+from pathlib import Path
+import pylasr
+
+inputs = "/data/tiles"
+job = Path("/data/cleaned-job")
+outputs = job / "outputs"
+outputs.mkdir(parents=True, exist_ok=True)
+checkpoint = str(job / "checkpoint")  # Leave this absent for the first run.
+
+def make_pipeline(resume=False):
+    pipeline = (
+        pylasr.classify_with_sor(k=10)
+        + pylasr.delete_points(["Classification == 18"])
+        + pylasr.write_las(str(outputs / "*.laz"))
+    )
+    pipeline.set_concurrent_files_strategy(2)
+    pipeline.set_checkpoint(checkpoint, resume=resume)
+    return pipeline
+
+result = make_pipeline().execute(inputs)
+
+# Reuse after an interruption, including in a new Python process.
+result = make_pipeline(resume=True).execute(inputs)
+```
+
+The normal Python result object contains all ordered output paths, including
+those reused from previous executions. See the [Python API](../python/README.md)
+for other pipeline methods.
+
+In C++, the equivalent method is
+`Pipeline::set_checkpoint(const std::string& path, bool resume = false)`:
+
+```cpp
+api::Pipeline pipeline = api::write_las("/data/cleaned-job/outputs/*.laz");
+pipeline.set_files({"/data/tiles"});
+pipeline.set_concurrent_files_strategy(2);
+pipeline.set_checkpoint("/data/cleaned-job/checkpoint", false);
+api::execute(pipeline.write_json());
+
+// Rebuild the same pipeline if restarting in another process.
+pipeline.set_checkpoint("/data/cleaned-job/checkpoint", true);
+api::execute(pipeline.write_json());
+```
+
+Use a separate fresh job location for each independent example above.
+
+## Supported workflows
+
+Checkpointing supports local LAS, LAZ, COPC, and PCD files, passed as explicit
+paths or a directory. A local VPC catalog is supported when its referenced
+point-cloud files are also local and use supported formats. Keep the VPC file
+and all referenced input contents unchanged.
+
+Supported operations include the following:
+
+- Ground classification with CSF, PTD, or IPF, and noise classification with IVF
+  or SOR.
+- Deterministic reader and point filters, attribute edits, point sorting, and
+  coordinate-system assignment.
+- Triangulation and transformations connected to supported pipeline stages,
+  including the R `normalize()` and `hag()` pipelines.
+- Rasterization with built-in metrics or a triangulation, focal processing,
+  pit filling, spike removal, and hull output.
+- LAS, LAZ, COPC, PCD, GeoTIFF, and GeoPackage outputs, with one file per chunk
+  for each output stage.
+
+For example, a separate job can normalize ground-classified inputs and write
+both a canopy-height raster and a normalized point cloud for each chunk:
+
+```r
+make_pipeline <- function() {
+  normalize() +
+    rasterize(1, "max", ofile = file.path(outputs, "*_chm.tif")) +
+    write_las(file.path(outputs, "*_normalized.laz"))
+}
+```
+
+This example requires suitable ground points for triangulation. Use a new
+checkpoint and unused output paths when changing the pipeline.
+
+Stages outside the supported set are rejected before output files are created.
+Unsupported workflows include:
+
+- Callbacks, summaries, user-defined R raster expressions, and other in-memory
+  results that cannot be reconstructed from output files.
+- In-memory point inputs, remote URLs, GDAL virtual filesystems, and EPT catalogs.
+- External raster or matrix loading with `load_raster()` or `load_matrix()`.
+- Stochastic sampling and random filters, including the default random method
+  of `sampling_pixel()`, `sampling_voxel()`, and `sampling_poisson()`.
+- Tree and neighborhood-metric stages, including `local_maximum()`,
+  `neighborhood_metrics()`, `geometry_features()`, and `region_growing()`.
+  Tree stages require additional support for their shared identifier state.
+- Shared merged output files, raster mosaics, and datasets requiring sidecar
+  files. A file writer must produce only its declared file for each chunk.
+
+The list of general lasR stages in the API reference is broader than the set
+supported by checkpointing.
+
+## Paths and job ownership
+
+Every output filename must contain exactly one `*`. Wildcards in parent
+directories are unsupported. Multiple writers are allowed, but their expanded
+paths must not collide with each other or with input files.
+
+All output parent directories must already exist. Outputs must be outside the
+checkpoint directory and outside every directory selected as input. Inputs
+must also be outside the checkpoint directory. The checkpoint directory itself
+must be new for a fresh run, with an existing parent directory. A fresh run
+refuses to overwrite any planned output that already exists.
+
+Use one job to own each set of output paths. A process lock prevents simultaneous
+use of the same checkpoint directory; it does not coordinate different jobs that
+target the same output files. The operating system releases the lock when a
+process exits, including after a forced termination. Keep the lock file in place.
+
+Use explicit, persistent output paths. Default temporary output names can change
+when you rebuild a pipeline and therefore are unsuitable for resuming a job.
+
+## What a resume checks
+
+A resume must match the original job's:
+
+- Input paths and complete file contents, including the VPC catalog when used.
+- Ordered pipeline stages, their parameters, connections, and output paths.
+- Chunk plan, spatial queries, buffering, and chunks selected for processing.
+- Processing strategy and core counts.
+- Loaded engine binary and GDAL version. Matching package version numbers alone
+  are insufficient; rebuilding or upgrading the engine can invalidate a job.
+
+All input files are read for checksums on every start. Completed output files
+are also read and checked before they are reused. This catches content changes
+even when file sizes and modification times are unchanged, but adds disk I/O;
+a resume that skips all processing still performs these checks.
+
+Keep inputs and the runtime unchanged throughout execution as well as between
+starts. Do not edit the checkpoint manifest or completion records to bypass a
+mismatch. To change inputs or processing settings, start a new job with a new
+checkpoint directory and unused output paths.
+
+## Completion and recovery
+
+Each chunk writes into private staging directories beside its final outputs.
+Writers close their files before each output is synced and published atomically.
+Only after all of a chunk's outputs are published does the engine save its
+completion record.
+
+A chunk with several output files is not published as one atomic group. If a
+process stops between files, that chunk has no completed record and runs again
+on resume. Likewise, a missing or modified completed output causes the whole
+chunk to be recomputed, including its other outputs. Intact completed chunks are
+reused. Empty chunks have durable records that explicitly record no output.
+
+An interrupted run may leave private staging directories. Resume handles that
+job's unfinished staging files; do not treat them as completed results. Preserve
+the checkpoint directory if you want to resume later or repair missing outputs.
+Unreadable or malformed checkpoint metadata causes an error rather than silently
+accepting incomplete results.
+
+This recovery model targets process interruptions on local filesystems with
+reliable atomic publication and syncing. It does not promise power-loss recovery
+or durability on network filesystems. Keep the input data, runtime, checkpoint,
+and job-owned output paths available for a compatible resume.

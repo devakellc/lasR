@@ -182,6 +182,7 @@ pybind11_add_module(pylasr
   # API implementation - NEW
   ${LASR_SOURCE_DIR}/src/LASRapi/api.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/execute.cpp
+  ${LASR_SOURCE_DIR}/src/LASRapi/checkpoint.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/tools.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/PipelineAPI_Impl.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/StageAPI_Impl.cpp
@@ -304,7 +305,7 @@ pybind11_add_module(pylasr
 )
 
 # Link libraries
-target_link_libraries(pylasr PRIVATE laszip ${GDAL_LIBRARIES})
+target_link_libraries(pylasr PRIVATE laszip ${GDAL_LIBRARIES} ${CMAKE_DL_LIBS})
 
 target_compile_definitions(pylasr PRIVATE
   USING_PYTHON=1

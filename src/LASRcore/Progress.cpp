@@ -13,11 +13,11 @@
 #endif
 
 #ifdef USING_R
-bool Progress::user_interrupt_event = false;
+std::atomic<bool> Progress::user_interrupt_event(false);
 #endif
 
 // Called only once in the processor() function
-Progress::Progress()
+Progress::Progress(bool reset_interrupt)
 {
   percentage = 0.0f;
   current = 0;
@@ -30,7 +30,7 @@ Progress::Progress()
 
 #ifdef USING_R
   interrupt_counter = 0;
-  user_interrupt_event = false;
+  if (reset_interrupt) user_interrupt_event = false;
   check_interrupt_enabled = true;
 #endif
 };
@@ -45,7 +45,7 @@ Progress::~Progress()
 void Progress::create_subprocess()
 {
   if (sub) delete sub;
-  sub = new Progress();
+  sub = new Progress(false);
   sub->set_display(this->display);
 }
 

@@ -336,15 +336,15 @@ BOOL LASwritePoint::write(const U8 * const * point)
   {
     for (i = 0; i < num_writers; i++)
     {
-      writers[i]->write(point[i], context);
+      if (!writers[i]->write(point[i], context)) return FALSE;
     }
   }
   else
   {
     for (i = 0; i < num_writers; i++)
     {
-      writers_raw[i]->write(point[i], context);
-      ((LASwriteItemCompressed*)(writers_compressed[i]))->init(point[i], context);
+      if (!writers_raw[i]->write(point[i], context)) return FALSE;
+      if (!((LASwriteItemCompressed*)(writers_compressed[i]))->init(point[i], context)) return FALSE;
     }
     writers = writers_compressed;
     enc->init(outstream);

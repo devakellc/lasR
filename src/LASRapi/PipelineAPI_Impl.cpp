@@ -111,7 +111,7 @@ std::string Pipeline::write_json(const std::string& path) const
   if (path == "")
   {
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();  // platform independent
-    temp_file = temp_dir / "pipeline.json";
+    temp_file = temp_dir / ("lasr-pipeline-" + Stage("temporary").get_uid() + ".json");
   }
   else
   {
@@ -186,6 +186,8 @@ nlohmann::json Pipeline::generate_json() const
   j["processing"]["profile_file"] = opt_profiling_file;
   j["processing"]["progress_file"] = opt_progress_file;
   j["processing"]["log_file"] = opt_log_file;
+  j["processing"]["checkpoint"] = opt_checkpoint;
+  j["processing"]["resume"] = opt_resume;
 
   // Serialize the pipeline stages
   j["pipeline"] = nlohmann::json::array();

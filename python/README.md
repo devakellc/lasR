@@ -18,6 +18,9 @@ The LASR Python bindings provide a clean, Pythonic interface to the powerful LAS
 - **Structured Error Handling**: Comprehensive error information and debugging
 - **Flexible Input Paths**: Pass a directory/catalog or an iterable of path-like objects; supports LAS, LAZ, COPC, PCD, and EPT formats
 - **Remote Data Access**: Stream data from HTTP, S3, Azure, GCS via GDAL virtual filesystems; COPC and EPT support efficient spatial queries over the network
+- **Checkpoint and Resume**: Reuse completed chunks of supported local pipelines
+  that write separate output files; see the
+  [checkpoint guide](../docs/checkpoint-resume.md).
 
 ## Installation
 
@@ -103,6 +106,51 @@ pipeline.set_concurrent_files_strategy(ncores=2)
 # Nested strategy (multiple files, multiple cores each)
 pipeline.set_nested_strategy(ncores1=2, ncores2=4)
 ```
+
+## Checkpoint and Resume
+
+`Pipeline.set_checkpoint(path, resume=False)` enables checkpoints for supported
+pipelines that write one file per chunk. On a fresh run, `path` must not exist,
+and every planned output must be absent. Create the output parent directory
+first; every output filename must contain exactly one `*`.
+
+```python
+from pathlib import Path
+import pylasr
+
+inputs = "/data/tiles"
+job = Path("/data/cleaned-job")  # Choose a new job location.
+outputs = job / "outputs"
+outputs.mkdir(parents=True, exist_ok=True)
+checkpoint = str(job / "checkpoint")  # Do not create this directory.
+
+def make_pipeline(resume=False):
+    pipeline = (
+        pylasr.classify_with_sor(k=10)
+        + pylasr.delete_points(["Classification == 18"])
+        + pylasr.write_las(str(outputs / "*.laz"))
+    )
+    pipeline.set_concurrent_files_strategy(2)
+    pipeline.set_checkpoint(checkpoint, resume=resume)
+    return pipeline
+
+result = make_pipeline().execute(inputs)
+
+# After an interruption, rebuild the same pipeline and reuse its checkpoint.
+result = make_pipeline(resume=True).execute(inputs)
+```
+
+Resume returns the complete ordered file results, including files from chunks
+completed earlier. Missing or modified outputs cause the whole chunk to run
+again. Keep input contents, paths, pipeline settings, chunking, buffering,
+processing strategy, core counts, engine binary, and GDAL version unchanged.
+
+This initial scope supports local LAS/LAZ/COPC/PCD inputs and local VPC catalogs.
+Callbacks, summaries or other in-memory results, external raster/matrix inputs,
+random sampling, shared output files, and tree stages with shared identifiers
+are unsupported. Inputs and existing completed outputs are checksummed on each
+start, which adds disk I/O. See the [complete guide](../docs/checkpoint-resume.md)
+for supported stages, path requirements, and filesystem limits.
 
 ## Available Stages
 

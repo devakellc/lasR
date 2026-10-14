@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <stdexcept>
 
 Engine::Engine()
 {
@@ -73,7 +74,39 @@ Engine::Engine(const Engine& other)
 
 Engine::~Engine()
 {
+  clear(true);
   clean();
+}
+
+void Engine::checkpoint_redirect(const std::map<std::string, std::string>& outputs)
+{
+  for (auto& stage : pipeline)
+  {
+    auto it = outputs.find(stage->get_uid());
+    if (it != outputs.end() && !stage->set_output_file(it->second))
+      throw std::runtime_error(last_error);
+  }
+}
+
+std::map<std::string, std::vector<std::string>> Engine::checkpoint_outputs() const
+{
+  std::map<std::string, std::vector<std::string>> outputs;
+  for (auto& stage : pipeline)
+  {
+    const auto* writer = dynamic_cast<const StageWriter*>(stage.get());
+    if (writer) outputs[stage->get_uid()] = writer->get_written();
+  }
+  return outputs;
+}
+
+void Engine::checkpoint_restore(const std::map<std::string, std::vector<std::string>>& outputs)
+{
+  for (auto& stage : pipeline)
+  {
+    auto* writer = dynamic_cast<StageWriter*>(stage.get());
+    auto it = outputs.find(stage->get_uid());
+    if (writer && it != outputs.end()) writer->set_written(it->second);
+  }
 }
 
 bool Engine::pre_run()
@@ -113,7 +146,7 @@ bool Engine::run_streamed()
   bool last_point = false;
 
   // To handle user interruption
-  Progress prg;
+  Progress prg(false);
   prg.set_total(INT64_MAX);
 
   size_t i = -1;

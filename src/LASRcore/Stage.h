@@ -174,6 +174,8 @@ public:
   StageWriter(const StageWriter& other);
   void merge(const Stage* other) override;
   void sort(const std::vector<int>& order) override;
+  const std::vector<std::string>& get_written() const { return written; }
+  void set_written(const std::vector<std::string>& files) { written = files; }
 
   #ifdef USING_R
   SEXP to_R() override;

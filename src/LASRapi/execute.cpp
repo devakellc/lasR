@@ -18,6 +18,8 @@
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
+#include <atomic>
+#include <mutex>
 
 #include "api.h"
 #include "openmp.h"
@@ -64,6 +66,11 @@ ReturnType execute(const std::string& config_file)
   // The JSON file is made of the processing options and the pipeline
   nlohmann::json processing_options = json["processing"];
   nlohmann::json json_pipeline = json["pipeline"];
+
+  if (!processing_options.value("checkpoint", std::string()).empty())
+    return execute_checkpoint(json);
+  if (processing_options.value("resume", false))
+    throw std::invalid_argument("'resume' requires a checkpoint directory");
 
   // Parse the processing options
   std::vector<int> ncpu = get_vector<int>(processing_options["ncores"]);
@@ -213,7 +220,14 @@ ReturnType execute(const std::string& config_file)
 
     progress.show();
 
-    bool failure = false;
+    std::atomic<bool> failure(false);
+    std::mutex error_mutex;
+    std::string worker_error;
+    auto record_failure = [&]()
+    {
+      std::lock_guard<std::mutex> guard(error_mutex);
+      if (!failure.exchange(true)) worker_error = last_error;
+    };
     int k = 0;
 
     #pragma omp parallel num_threads(ncpu_outer_loop)
@@ -237,7 +251,7 @@ ReturnType execute(const std::string& config_file)
           Chunk chunk;
           if (!lascatalog->get_chunk(i, chunk))
           {
-            failure = true;
+            record_failure();
             continue;
           }
 
@@ -272,7 +286,7 @@ ReturnType execute(const std::string& config_file)
           // overall processed region
           if (!private_pipeline.set_chunk(chunk))
           {
-            failure = true;
+            record_failure();
             continue;
           }
 
@@ -281,7 +295,7 @@ ReturnType execute(const std::string& config_file)
           // result into a file
           if (!private_pipeline.run())
           {
-            failure = true;
+            record_failure();
             continue;
           }
 
@@ -313,7 +327,7 @@ ReturnType execute(const std::string& config_file)
       {
         last_error = e;
         log(flog, verbose, "ERROR: %s\n", last_error.c_str());
-        failure = true;
+        record_failure();
       }
     }
 
@@ -334,7 +348,7 @@ ReturnType execute(const std::string& config_file)
 
     if (failure)
     {
-      throw std::runtime_error(last_error);
+      throw std::runtime_error(worker_error);
     }
 
     pipeline.sort();

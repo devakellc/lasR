@@ -12,6 +12,11 @@ The `lasr` library (pronounced "laser") is a C++ library for large scale airborn
 
 `lasr` offers a range of tools to process massive volumes of lidar data efficiently in a production environment using either the `C++` API, the R API (`lasR` package) or the Python API (`pylasr` package).
 
+Supported pipelines that write one file per chunk can use checkpoints to resume
+interrupted processing of local point clouds. Completed chunks are checked and
+reused, while unfinished chunks are processed again. See the
+[checkpoint and resume guide](docs/checkpoint-resume.md) for examples and limits.
+
 💵 [Sponsor `lasr`](https://github.com/sponsors/Jean-Romain). It is free and open source, but requires time and effort to develop and maintain.
 
 ## Documentation

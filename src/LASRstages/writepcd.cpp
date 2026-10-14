@@ -76,7 +76,11 @@ bool LASRpcdwriter::process(Point*& p)
     }
   }
 
-  pcdio->write_point(p);
+  if (!pcdio->write_point(p))
+  {
+    last_error = "Failed to write a PCD point: " + ofile;
+    return false;
+  }
 
   return true;
 }
@@ -139,6 +143,14 @@ bool LASRpcdwriter::set_chunk(Chunk& chunk)
     return false;
   }
   return true;
+}
+
+bool LASRpcdwriter::write()
+{
+  if (merged || pcdio == nullptr) return true;
+  if (pcdio->finish()) return true;
+  last_error = "Failed to finalize PCD output: " + ofile;
+  return false;
 }
 
 void LASRpcdwriter::clear(bool last)

@@ -1,5 +1,11 @@
 # lasR 0.21.2
 
+- New: opt-in checkpoint and resume for supported local pipelines with separate
+  chunk outputs. R accepts `checkpoint` and `resume` execution options; Python
+  and C++ expose `Pipeline.set_checkpoint()`. Resume verifies inputs, settings,
+  the engine build, and completed outputs before reusing work.
+- Fix: detect point-cloud write and finalization failures before marking a chunk
+  complete, including delayed LAS/LAZ/COPC and PCD flush errors.
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

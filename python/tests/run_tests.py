@@ -58,7 +58,8 @@ def run_all_tests():
         'test_basic_import',
         'test_pipeline', 
         'test_functions',
-        'test_integration'
+        'test_integration',
+        'test_checkpoint'
     ]
     
     print("RUNNING TEST MODULES")
