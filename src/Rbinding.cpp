@@ -172,7 +172,7 @@ SEXP print_pipeline(SEXP ptr)
 /*
  * R wrapper to generate the json file
  */
-std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with)
+static api::Pipeline prepare_pipeline(SEXP ptr, const std::vector<std::string>& on, Rcpp::List with)
 {
   // Initialize with default values
   double buffer = 0.0;
@@ -205,6 +205,11 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   update_if_present(ncores, "ncores");
   update_if_present(noprocess, "noprocess");
 
+  if (strategy != "sequential" && ncores.empty())
+    throw std::invalid_argument("'ncores' must contain a core count");
+  if (strategy == "nested" && ncores.size() < 2)
+    throw std::invalid_argument("Using nested strategy requires two core counts");
+
   // Retrieve pipeline and make a deep copy
   api::Pipeline* tmp = as_pipeline(ptr);
   api::Pipeline p(*tmp);
@@ -232,7 +237,14 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   else
     throw std::invalid_argument("Invalid strategy");
 
-  // Generate and execute the pipeline
+  return p;
+}
+
+std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with)
+{
+  api::Pipeline p = prepare_pipeline(ptr, on, with);
+
+  // Execution retains its existing JSON-file interface.
   SEXP call = PROTECT(Rf_lang1(Rf_install("tempdir")));
   SEXP result = PROTECT(Rf_eval(call, R_GlobalEnv));
   const char* path_cstr = CHAR(STRING_ELT(result, 0));
@@ -241,6 +253,53 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   path += "/pipeline.json";
   std::string f = p.write_json(path);
   return f;
+}
+
+static SEXP json_to_r(const nlohmann::json& value)
+{
+  if (value.is_null()) return R_NilValue;
+  if (value.is_boolean()) return Rcpp::wrap(value.get<bool>());
+  if (value.is_string()) return Rcpp::wrap(value.get<std::string>());
+  if (value.is_number_unsigned())
+  {
+    auto number = value.get<nlohmann::json::number_unsigned_t>();
+    if (number <= static_cast<unsigned int>(std::numeric_limits<int>::max()))
+      return Rcpp::wrap(static_cast<int>(number));
+    return Rcpp::wrap(static_cast<double>(number));
+  }
+  if (value.is_number_integer())
+  {
+    auto number = value.get<nlohmann::json::number_integer_t>();
+    // INT_MIN is R's missing-integer sentinel, so retain it as a double.
+    if (number > std::numeric_limits<int>::min() && number <= std::numeric_limits<int>::max())
+      return Rcpp::wrap(static_cast<int>(number));
+    return Rcpp::wrap(static_cast<double>(number));
+  }
+  if (value.is_number_float()) return Rcpp::wrap(value.get<double>());
+
+  Rcpp::List result(value.size());
+  R_xlen_t i = 0;
+  if (value.is_object())
+  {
+    Rcpp::CharacterVector names(value.size());
+    for (const auto& item : value.items())
+    {
+      names[i] = item.key();
+      result[i++] = json_to_r(item.value());
+    }
+    result.attr("names") = names;
+  }
+  else
+  {
+    for (const auto& item : value) result[i++] = json_to_r(item);
+  }
+  return result;
+}
+
+SEXP plan_pipeline(SEXP ptr, std::vector<std::string> on, Rcpp::List with)
+{
+  api::Pipeline p = prepare_pipeline(ptr, on, with);
+  return json_to_r(p.plan());
 }
 
 /*
@@ -412,6 +471,7 @@ SEXP make_stage(std::string stage_name, Rcpp::List opts)
 RCPP_MODULE(operations)
 {
   function("generate_json", &generate_json, "Write JSON on disk");
+  function("pipeline_plan", &plan_pipeline, "Inspect a pipeline without executing it");
   function("excecute_pipeline", &execute_pipeline, "Execute pipeline");
   function("merge_pipeline", &merge_pipeline, "Concatenate pipelines");
   function("print_pipeline", &print_pipeline, "Print pipelines");

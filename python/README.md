@@ -86,6 +86,36 @@ pipeline.set_concurrent_files_strategy(2)
 result = pipeline.execute(["file1.las", "file2.las"])
 ```
 
+### Pipeline Validation and Execution Plans
+
+Inspect a pipeline before processing points or creating output files:
+
+```python
+pipeline = pylasr.summarise(metrics=["z_max", "i_mean", "count"])
+report = pipeline.plan(["tile1.laz", "tile2.laz"])
+print(report["status"])
+print(report["processing"])
+print(report["diagnostics"])
+```
+
+`pipeline.plan(files=None)` and `pipeline.validate(files=None)` return the same
+report dictionary. They inspect a copy, so supplying files does not change the
+pipeline's configured inputs. Omitting files uses those configured inputs.
+
+Reports include stages, available input metadata, requested and effective
+processing settings, chunks, planned output paths, and diagnostics. `status`
+is `"valid"`, `"invalid"`, or `"incomplete"`; `valid` is respectively `True`,
+`False`, or `None`. Errors make a report invalid. Deferred checks make it
+incomplete when no error was found. Warnings may accompany any status.
+
+Planning does not invoke callbacks or download remote inputs. Unknown schemas,
+opaque stages, and unavailable bounds remain explicit in the report. A valid
+plan confirms the checks performed; it does not guarantee successful execution
+or reserve output paths. Review diagnostics and execute with the same inputs
+and settings. See the
+[complete planning guide](../vignettes/pipeline-plans.Rmd) for checked conditions,
+limitations, and R examples.
+
 ### Processing Strategies
 
 LASR supports different parallelization strategies:
@@ -181,6 +211,8 @@ The Python API closely mirrors the R API structure:
 | R | Python |
 |---|--------|
 | `exec(pipeline, on = files)` | `pipeline.execute(files)` |
+| `pipeline_plan(pipeline, on = files)` | `pipeline.plan(files)` |
+| `validate_pipeline(pipeline, on = files)` | `pipeline.validate(files)` |
 | `pipeline + stage` | `pipeline + stage` |
 | `with = list(ncores = 4)` | `pipeline.set_concurrent_points_strategy(4)` |
 | `filter = "Z > 10"` | `filter = ["Z > 10"]` |

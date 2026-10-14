@@ -1,5 +1,6 @@
 #include <fstream>
 #include <iostream>
+#include <cmath>
 
 #include "api.h"
 
@@ -73,6 +74,13 @@ void Pipeline::set_nested_strategy(int ncores1, int ncores2)
   opt_strategy = "nested";
 }
 
+void Pipeline::set_chunk(double val)
+{
+  if (!std::isfinite(val) || val < 0)
+    throw std::invalid_argument("chunk must be nonnegative and finite");
+  if (val > 0) opt_chunk = val;
+}
+
 std::string Pipeline::to_string() const
 {
   std::string out;
@@ -127,6 +135,39 @@ std::string Pipeline::write_json(const std::string& path) const
   return temp_file.string();
 }
 
+nlohmann::json Pipeline::plan() const
+{
+  try
+  {
+    return pipeline_plan(generate_json());
+  }
+  catch (const std::exception& error)
+  {
+    return {
+      {"schema_version", 1},
+      {"status", "invalid"},
+      {"valid", false},
+      {"scope", (!files.empty() || has_catalog()) ? "inputs" : "pipeline"},
+      {"diagnostics", nlohmann::json::array({{
+        {"severity", "error"},
+        {"code", "invalid_configuration"},
+        {"message", error.what()}
+      }})},
+      {"stages", nlohmann::json::array()},
+      {"capabilities", nlohmann::json::object()},
+      {"processing", nlohmann::json::object()},
+      {"inputs", nlohmann::json::array()},
+      {"chunks", nullptr},
+      {"outputs", nlohmann::json::array()}
+    };
+  }
+}
+
+nlohmann::json Pipeline::validate() const
+{
+  return plan();
+}
+
 nlohmann::json Pipeline::generate_json() const
 {
   // Create a temporary copy of the pipeline since this function is `const`
@@ -147,8 +188,8 @@ nlohmann::json Pipeline::generate_json() const
   }
 
   // If files were specified, we need to ensure the presence of a 'build_catalog' stage.
-  // If not, assume generate_json() was called without set_file(), which is allowed
-  // for parsing or inspection purposes, though execution would fail.
+  // Without files, an R compatibility catalog may already carry an input.
+  // Otherwise leave the catalog absent for pipeline-only inspection.
   if (!files.empty())
   {
     // Normally, the 'build_catalog' stage should not exist yet and is added here.
@@ -164,13 +205,21 @@ nlohmann::json Pipeline::generate_json() const
         catalog.set("noprocess", opt_noprocess);
       p.stages.push_front(catalog);
     }
-    else
+  }
+
+  // R data.frame and cloud inputs use an injected catalog and an empty file
+  // list. Their options must follow the same preparation path as file inputs.
+  if (has_catalog())
+  {
+    auto it = p.stages.begin();
+    if (opt_chunk > 0 && it->has("type"))
     {
-      // Update the existing 'build_catalog' stage with current options.
-      auto it = p.stages.begin();
-      it->set("buffer", opt_buffer);
-      it->set("chunk", opt_chunk);
+      const std::string type = std::get<std::string>(it->get("type"));
+      if (type == "dataframe" || type == "externalptr")
+        throw std::invalid_argument("Chunking an in-memory input is not supported");
     }
+    it->set("buffer", opt_buffer);
+    it->set("chunk", opt_chunk);
   }
 
   // Construct the output JSON

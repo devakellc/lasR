@@ -3,6 +3,16 @@
 
 #include <stdio.h>
 
+namespace
+{
+class ScopedQuietErrorHandler
+{
+public:
+  ScopedQuietErrorHandler() { CPLPushErrorHandler(CPLQuietErrorHandler); }
+  ~ScopedQuietErrorHandler() { CPLPopErrorHandler(); }
+};
+}
+
 CRS::CRS()
 {
   valid = false;
@@ -15,7 +25,7 @@ CRS::CRS(int code, bool err)
   epsg = code;
   if (epsg == 0) return;
 
-  CPLPushErrorHandler(CPLQuietErrorHandler);
+  ScopedQuietErrorHandler error_handler;
 
   if (oSRS.importFromEPSG(epsg) != OGRERR_NONE)
   {
@@ -37,7 +47,6 @@ CRS::CRS(int code, bool err)
   CPLFree(pszNewWKT);
   CSLDestroy(papszOptions);
 
-  CPLPopErrorHandler();
 }
 
 CRS::CRS(const std::string& str, bool err)
@@ -47,7 +56,7 @@ CRS::CRS(const std::string& str, bool err)
   wkt = str;
   if (wkt.empty()) return;
 
-  CPLPushErrorHandler(CPLQuietErrorHandler);
+  ScopedQuietErrorHandler error_handler;
 
   if (oSRS.importFromWkt(wkt.c_str()) != OGRERR_NONE)
   {
@@ -65,7 +74,6 @@ CRS::CRS(const std::string& str, bool err)
     epsg = std::stoi(authority_code);
   }
 
-  CPLPopErrorHandler();
 }
 
 OGRSpatialReference CRS::get_crs() const

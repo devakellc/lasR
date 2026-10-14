@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <filesystem>
+#include <cmath>
 
 // To parse JSON VPC
 #include <nlohmann/json.hpp>
@@ -63,8 +64,9 @@ static std::string filename_from_url(const std::string& url)
   return name;
 }
 
-bool FileCollection::read(const std::vector<std::string>& files, bool progress)
+bool FileCollection::read(const std::vector<std::string>& files, bool progress, bool inspection)
 {
+  this->inspection = inspection;
   if (files.size() == 0)
   {
     last_error = "There is no file to read";
@@ -126,6 +128,11 @@ bool FileCollection::read(const std::vector<std::string>& files, bool progress)
             success = add_las_file(f);
           else if (type == PCDFILE)
             success = add_pcd_file(f);
+          else if (inspection && type == EPTFILE)
+          {
+            last_error = "Inspection metadata unavailable: EPT directory metadata is not opened: " + f;
+            return false;
+          }
 
           if (!success) return false;
         }
@@ -532,13 +539,19 @@ bool FileCollection::add_las_file(std::string file, bool noprocess)
 {
   std::replace(file.begin(), file.end(), '\\', '/' );
 
+  if (inspection && is_remote_path(file))
+  {
+    last_error = "Inspection metadata unavailable: remote LAS metadata is not opened: " + file;
+    return false;
+  }
+
   Header header;
   LASio reader;
 
   try
   {
     reader.open(file);
-    reader.populate_header(&header, true);
+    reader.populate_header(&header, !inspection);
     reader.close();
   }
   catch (const std::exception& e)
@@ -566,7 +579,7 @@ bool FileCollection::add_pcd_file(std::string file, bool noprocess)
 
   Header header;
   PCDio reader;
-  reader.preread_bbox = true;
+  reader.preread_bbox = !inspection;
 
   try
   {
@@ -589,6 +602,12 @@ bool FileCollection::add_pcd_file(std::string file, bool noprocess)
 
 bool FileCollection::add_ept_endpoint(std::string path, bool noprocess)
 {
+  if (inspection)
+  {
+    last_error = "Inspection metadata unavailable: EPT metadata is not opened: " + path;
+    return false;
+  }
+
   if (files.size() > 0)
   {
     last_error = "Only a single EPT endpoint is supported";
@@ -677,6 +696,18 @@ bool FileCollection::set_noprocess(const std::vector<bool>& b)
 
 bool FileCollection::set_chunk_size(double size)
 {
+  if (inspection && !has_complete_bounds())
+  {
+    last_error = "Cannot plan chunks without complete input bounds";
+    return false;
+  }
+
+  if (inspection && (!std::isfinite(size) || size < 0))
+  {
+    last_error = "Inspection chunk size must be finite and nonnegative";
+    return false;
+  }
+
   chunk_size = 0;
 
   if (size > 0)
@@ -685,6 +716,25 @@ bool FileCollection::set_chunk_size(double size)
     {
       last_error = "Impossible to set chunk size with queries";
       return false;
+    }
+
+    if (inspection)
+    {
+      // Check the same rounded grid as Grid without unsafe int conversions or
+      // constructing an unbounded number of inspection queries.
+      double left = std::round((xmin - 0.5 * size) / size) * size;
+      double right = std::round((xmax - 0.5 * size) / size) * size + size;
+      double bottom = std::round((ymin - 0.5 * size) / size) * size;
+      double top = std::round((ymax - 0.5 * size) / size) * size + size;
+      double ncols = std::round((right - left) / size);
+      double nrows = std::round((top - bottom) / size);
+      double cells = ncols * nrows;
+      if (!std::isfinite(ncols) || !std::isfinite(nrows) || !std::isfinite(cells) ||
+          ncols < 1 || nrows < 1 || cells > 100000)
+      {
+        last_error = "Inspection chunk limit: the grid must contain between 1 and 100000 cells";
+        return false;
+      }
     }
 
     chunk_size = size;
@@ -706,10 +756,34 @@ bool FileCollection::set_chunk_size(double size)
 
 bool FileCollection::get_chunk(int i, Chunk& chunk) const
 {
-  if (i < 0 || i > get_number_chunks())
+  if (inspection && !has_complete_bounds())
+  {
+    last_error = "Cannot plan chunks without complete input bounds";
+    return false;
+  }
+
+  if (i < 0 || i > get_number_chunks() || (inspection && i == get_number_chunks()))
   {
     last_error = "chunk request out of bounds"; // # nocov
     return false; // # nocov
+  }
+
+  if (inspection)
+  {
+    const bool query = !queries.empty();
+    const double minx = query ? queries[i]->xmin() : headers[i].min_x;
+    const double miny = query ? queries[i]->ymin() : headers[i].min_y;
+    const double maxx = query ? queries[i]->xmax() : headers[i].max_x;
+    const double maxy = query ? queries[i]->ymax() : headers[i].max_y;
+    if (!std::isfinite(buffer) || buffer < 0 ||
+        !std::isfinite(minx - buffer) || !std::isfinite(miny - buffer) ||
+        !std::isfinite(maxx + buffer) || !std::isfinite(maxy + buffer) ||
+        (query && (!std::isfinite(queries[i]->centroid().x) ||
+                   !std::isfinite(queries[i]->centroid().y))))
+    {
+      last_error = "Invalid inspection chunk: buffer and expanded query bounds must be finite";
+      return false;
+    }
   }
 
   bool success = false;
@@ -733,6 +807,19 @@ bool FileCollection::get_chunk(int i, Chunk& chunk) const
 const std::vector<std::filesystem::path>& FileCollection::get_files() const
 {
   return files;
+}
+
+bool FileCollection::has_complete_bounds() const
+{
+  if (headers.empty()) return false;
+  for (const Header& header : headers)
+  {
+    if (!std::isfinite(header.min_x) || !std::isfinite(header.min_y) ||
+        !std::isfinite(header.max_x) || !std::isfinite(header.max_y) ||
+        header.min_x > header.max_x || header.min_y > header.max_y)
+      return false;
+  }
+  return true;
 }
 
 PathType FileCollection::get_format() const

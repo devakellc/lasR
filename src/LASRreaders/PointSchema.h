@@ -335,6 +335,7 @@ public:
   AttributeAccessor(const std::string& name, double default_value = 0);
   AttributeAccessor(const std::string& name, AttributeSchema* schema, double default_value = 0);
   ~AttributeAccessor() = default;
+  const std::string& get_name() const { return name; }
 
   // Overloaded operators for reading and writing
   double operator()(const Point* point);

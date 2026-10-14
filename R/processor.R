@@ -33,13 +33,11 @@
 #' @export
 exec = function(pipeline, on, with = NULL, ...)
 {
-  # Parse options and give precedence to 1. global options 2. LAScatalog 3. with arguments 4. ... arguments
-  with = parse_options(on, with, ...)
-
   # String to a file. Special case for experimental lasRui: github.com/r-lidar/lasRui
   # No documented, experimental, very hacky
   if (is.character(pipeline))
   {
+    with = parse_options(on, with, ...)
     if (!file.exists(pipeline))
       stop("File does not exist")
 
@@ -51,72 +49,11 @@ exec = function(pipeline, on, with = NULL, ...)
     with$progress_file = tempfile(fileext = ".tmp")
   }
   # Normal case
-  else if (methods::is(pipeline, "PipelinePtr"))
+  else
   {
-    on_is_valid = FALSE
-
-    # If 'on' is character, this is the default behavior.
-    if (is.character(on))
-    {
-      stopifnot(length(on) > 0)
-      is_remote <- grepl("^https?://|^/vsi", on)
-      on[!is_remote] <- normalizePath(on[!is_remote], mustWork = FALSE)
-      on_is_valid = TRUE
-    }
-
-    # If 'on' is a LAS from lidR or a data.frame. Compatibility mode for R exclusively. The reader_las
-    # stage is modified to call R specific stages that are not compiled outside of R
-    if (methods::is(on, "LAS") || is.data.frame(on))
-    {
-      accuracy = c(0,0,0)
-
-      if (methods::is(on, "LAS"))
-      {
-        accuracy <- c(on@header@PHB[["X scale factor"]], on@header@PHB[["Y scale factor"]], on@header@PHB[["Z scale factor"]])
-        crs <- on@crs$wkt
-        on <- on@data
-        attr(on, "accuracy") <- accuracy
-        attr(on, "crs") <- crs
-      }
-
-      dataframe = on
-      on = character()
-
-      crs <- attr(dataframe, "crs")
-      if (is.null(crs)) crs = ""
-      if (!is.character(crs) & length(crs != 1)) stop("The CRS of this data.frame is not a WKT string")
-
-      acc <- attr(dataframe, "accuracy")
-      if (is.null(acc)) acc = c(0, 0, 0)
-      if (!is.numeric(acc) & length(acc) != 3L) stop("The accuracy of this data.frame is not valid")
-
-      addr = .APIOPERATIONS$get_address(dataframe)
-      pipeline = .APIOPERATIONS$cast_pipeline_to_dataframe_compatible(pipeline, addr, crs, accuracy)
-      on_is_valid = TRUE
-    }
-
-    # If 'on' is a LAScatalog, for convenient compatibility with lidR we pick-up the file names
-    if (methods::is(on, "LAScatalog"))
-    {
-      on <- on$filename
-      is_remote <- grepl("^https?://|^/vsi", on)
-      on[!is_remote] <- normalizePath(on[!is_remote], mustWork = FALSE)
-      on_is_valid = TRUE
-    }
-
-    # Special case for the R API
-    if (methods::is(on, "lasrcloud"))
-    {
-      xptr = on[[1]]
-      on = character()
-      addr = .APIOPERATIONS$get_address(xptr)
-      pipeline = .APIOPERATIONS$cast_pipeline_to_xptr_compatible(pipeline, addr)
-      on_is_valid = TRUE
-    }
-
-    if (!on_is_valid) stop("Invalid argument 'on'.")
-
-    json_file <- .APIOPERATIONS$generate_json(pipeline, on, with)
+    prepared <- prepare_pipeline(pipeline, on, with, ...)
+    with <- prepared$options
+    json_file <- .APIOPERATIONS$generate_json(prepared$pipeline, prepared$on, with)
   }
 
   ans  <- .APIOPERATIONS$excecute_pipeline(json_file)
@@ -131,6 +68,84 @@ exec = function(pipeline, on, with = NULL, ...)
     return(ans[[1]])
   else
     return(ans)
+}
+
+prepare_pipeline = function(pipeline, on, with = NULL, ..., allow_no_input = FALSE)
+{
+  if (!methods::is(pipeline, "PipelinePtr"))
+    stop("'pipeline' must be a PipelinePtr object")
+
+  # Keep the original pipeline's callback attributes and all input payloads alive.
+  # Their addresses, rather than their contents, are passed to the C++ parser.
+  keepalive <- list(pipeline = pipeline, input = on)
+  options <- parse_options(on, with, ...)
+  on_is_valid <- FALSE
+
+  if (is.null(on) && allow_no_input)
+  {
+    on <- character()
+    on_is_valid <- TRUE
+  }
+  else if (is.character(on))
+  {
+    stopifnot(length(on) > 0)
+    is_remote <- grepl("^https?://|^/vsi", on)
+    on[!is_remote] <- normalizePath(on[!is_remote], mustWork = FALSE)
+    on_is_valid <- TRUE
+  }
+
+  # R compatibility readers refer to data frames and clouds by address.
+  if (methods::is(on, "LAS") || is.data.frame(on))
+  {
+    accuracy <- c(0, 0, 0)
+
+    if (methods::is(on, "LAS"))
+    {
+      accuracy <- c(on@header@PHB[["X scale factor"]], on@header@PHB[["Y scale factor"]], on@header@PHB[["Z scale factor"]])
+      crs <- on@crs$wkt
+      on <- on@data
+      attr(on, "accuracy") <- accuracy
+      attr(on, "crs") <- crs
+    }
+
+    dataframe <- on
+    on <- character()
+
+    crs <- attr(dataframe, "crs")
+    if (is.null(crs)) crs <- ""
+    if (!is.character(crs) & length(crs != 1)) stop("The CRS of this data.frame is not a WKT string")
+
+    acc <- attr(dataframe, "accuracy")
+    if (is.null(acc)) acc <- c(0, 0, 0)
+    if (!is.numeric(acc) & length(acc) != 3L) stop("The accuracy of this data.frame is not valid")
+
+    keepalive$dataframe <- dataframe
+    addr <- .APIOPERATIONS$get_address(dataframe)
+    pipeline <- .APIOPERATIONS$cast_pipeline_to_dataframe_compatible(pipeline, addr, crs, accuracy)
+    on_is_valid <- TRUE
+  }
+
+  if (methods::is(on, "LAScatalog"))
+  {
+    on <- on$filename
+    is_remote <- grepl("^https?://|^/vsi", on)
+    on[!is_remote] <- normalizePath(on[!is_remote], mustWork = FALSE)
+    on_is_valid <- TRUE
+  }
+
+  if (methods::is(on, "lasrcloud"))
+  {
+    xptr <- on[[1]]
+    on <- character()
+    keepalive$xptr <- xptr
+    addr <- .APIOPERATIONS$get_address(xptr)
+    pipeline <- .APIOPERATIONS$cast_pipeline_to_xptr_compatible(pipeline, addr)
+    on_is_valid <- TRUE
+  }
+
+  if (!on_is_valid) stop("Invalid argument 'on'.")
+
+  list(pipeline = pipeline, on = on, options = options, keepalive = keepalive)
 }
 
 read_as_common_r_object = function(ans)

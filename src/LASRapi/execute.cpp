@@ -21,6 +21,7 @@
 
 #include "api.h"
 #include "openmp.h"
+#include "Parallelism.h"
 #include "error.h"
 #include "print.h"
 
@@ -155,31 +156,12 @@ ReturnType execute(const std::string& config_file)
 
     int n = lascatalog->get_number_chunks();
 
-    if (n == 1 && ncpu_outer_loop > 1)
-      std::swap(ncpu_outer_loop, ncpu_inner_loops);
-
-    // Check some multi-threading stuff
-    if (ncpu_outer_loop > n) ncpu_outer_loop = n;
-    if (!is_parallelized && ncpu_inner_loops > 1) ncpu_inner_loops = 1;
-    if (!is_parallelizable && ncpu_outer_loop > 1)
-    {
-      ncpu_inner_loops = ncpu_outer_loop;
-      ncpu_outer_loop = 1;
+    int constraint = adjust_parallelism(ncpu_outer_loop, ncpu_inner_loops, n,
+                                        is_parallelized, is_parallelizable, use_rcapi);
+    if (constraint == 1)
       warning("This pipeline is not parallizable using 'concurrent-files' strategy.\n");
-    }
-
-    if (use_rcapi && ncpu_outer_loop > 1)
-    {
-      // The R's C stack is now unprotected — the work with R C API becomes more dangerous
-      // but we can run parallel stuff without strange problems like: C stack usage is too close to the limit
-      // It is supposed to be safe because every single call to the R's C API is protected in a critical section
-      // https://stats.blogoverflow.com/2011/08/using-openmp-ized-c-code-with-r/
-      // https://stat.ethz.ch/pipermail/r-devel/2007-June/046207.html
-      //R_CStackLimit=(uintptr_t)-1;
-      ncpu_inner_loops = ncpu_outer_loop;
-      ncpu_outer_loop = 1;
+    else if (constraint == 2)
       warning("This pipeline is not parallizable using 'concurrent-files' strategy because of stage(s) that imply injected R code\n");
-    }
 
     pipeline.set_verbose(verbose);
     pipeline.set_ncpu(ncpu_inner_loops);

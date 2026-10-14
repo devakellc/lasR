@@ -153,7 +153,7 @@ public:
   void set_verbose(bool b) { opt_verbose = b; };
   void set_buffer(double val) { opt_buffer = val; };
   void set_progress(bool b) { opt_progress = b; };
-  void set_chunk(double val) { if(val> 0) opt_chunk = val; };
+  void set_chunk(double val);
   void set_profile_file(const std::string& path) { opt_profiling_file = path; };
   void set_progress_file(const std::string& path) { opt_progress_file = path; };
   void set_log_file(const std::string& path) { opt_log_file = path; };
@@ -165,6 +165,8 @@ public:
   std::string to_string() const;
   std::string write_json(const std::string& path = "") const;
   nlohmann::json generate_json() const;
+  nlohmann::json plan() const;
+  nlohmann::json validate() const;
 
   std::list<Stage>& get_stages() { return stages; };
 
@@ -187,6 +189,7 @@ private:
 
 ReturnType execute(const std::string& config_file);
 PipelineInfo pipeline_info(const std::string& config_file);
+nlohmann::json pipeline_plan(const nlohmann::json& config);
 
 Pipeline add_attribute(std::string data_type, std::string name, std::string description, double scale = 1, double offset = 0);
 Pipeline add_rgb();

@@ -13,6 +13,7 @@ Engine::Engine()
 {
   ncpu = 1;
   parsed = false;
+  inspection = false;
   verbose = false;
   streamable = true;
   read_payload = false;
@@ -34,6 +35,7 @@ Engine::Engine(const Engine& other)
 {
   ncpu = other.ncpu;
   parsed = other.parsed;
+  inspection = other.inspection;
   verbose = other.verbose;
   streamable = other.streamable;
   read_payload = other.read_payload;
@@ -78,6 +80,12 @@ Engine::~Engine()
 
 bool Engine::pre_run()
 {
+  if (inspection)
+  {
+    last_error = "An inspected pipeline cannot be executed";
+    return false;
+  }
+
   FileCollection* ctg = catalog.get();
   for (auto&& stage : pipeline)
   {
@@ -94,6 +102,12 @@ bool Engine::pre_run()
 
 bool Engine::run()
 {
+  if (inspection)
+  {
+    last_error = "An inspected pipeline cannot be executed";
+    return false;
+  }
+
   bool success;
 
   if (streamable)
@@ -317,6 +331,12 @@ void Engine::merge(const Engine& other)
 
 bool Engine::set_chunk(Chunk& chunk)
 {
+  if (inspection)
+  {
+    last_error = "An inspected pipeline cannot initialize execution chunks";
+    return false;
+  }
+
   order.push_back(chunk.id);
 
   profiler.tic();
@@ -375,6 +395,28 @@ void Engine::set_verbose(bool verbose)
 {
   this->verbose = verbose;
   for (auto&& stage : pipeline) stage->set_verbose(verbose);
+}
+
+nlohmann::json Engine::inspection_stages() const
+{
+  nlohmann::json stages = nlohmann::json::array();
+  for (const auto& stage : pipeline)
+  {
+    nlohmann::json entry = {
+      {"uid", stage->get_uid()},
+      {"name", stage->get_name()},
+      {"streamable", stage->is_streamable()},
+      {"read_points", stage->need_points()},
+      {"parallelizable", stage->is_parallelizable()},
+      {"parallelized", stage->is_parallelized()},
+      {"use_rcapi", stage->use_rcapi()},
+      {"required_buffer", stage->need_buffer()}
+    };
+    if (dynamic_cast<const StageRaster*>(stage.get())) entry["output_type"] = "raster";
+    else if (dynamic_cast<const StageVector*>(stage.get())) entry["output_type"] = "vector";
+    stages.push_back(std::move(entry));
+  }
+  return stages;
 }
 
 bool Engine::is_streamable() const

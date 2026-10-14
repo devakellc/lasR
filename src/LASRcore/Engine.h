@@ -31,7 +31,8 @@ public:
   Engine();
   Engine(const Engine& other);
   ~Engine();
-  bool parse(const nlohmann::json&, bool progress = false); // implemented in parser.cpp
+  bool parse(const nlohmann::json&, bool progress = false, bool inspection = false); // implemented in parser.cpp
+  nlohmann::json inspection_stages() const;
   bool pre_run();
   bool run();
   void merge(const Engine& other);
@@ -66,6 +67,7 @@ private:
 private:
   int ncpu;
   bool parsed;
+  bool inspection;
   bool verbose;
   bool streamable;
   bool parallelizable;
