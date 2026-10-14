@@ -66,7 +66,8 @@ clear them when the job is finished.
 With `noread = TRUE`, R returns file paths, including paths from chunks completed
 in earlier executions. A single output stage returns a character vector;
 multiple output stages return a named list of vectors. Paths follow the chunk
-plan order, regardless of completion order. With the default `noread = FALSE`,
+plan order, regardless of completion order. Returned paths are canonical absolute
+paths. With the default `noread = FALSE`,
 the usual R conversion of raster and vector files still applies.
 
 An empty chunk gets a completion record without an invented output file. Its

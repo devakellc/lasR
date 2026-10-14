@@ -183,6 +183,7 @@ pybind11_add_module(pylasr
   ${LASR_SOURCE_DIR}/src/LASRapi/api.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/execute.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/checkpoint.cpp
+  ${LASR_SOURCE_DIR}/src/LASRapi/checkpoint_files.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/tools.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/PipelineAPI_Impl.cpp
   ${LASR_SOURCE_DIR}/src/LASRapi/StageAPI_Impl.cpp

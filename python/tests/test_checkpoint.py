@@ -30,7 +30,7 @@ class TestCheckpoint(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix="pylasr-checkpoint-")
         self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
+        self.root = Path(directory.name).resolve()
         self.inputs = self.root / "input"
         self.outputs = self.root / "output"
         self.inputs.mkdir()
