@@ -1,5 +1,7 @@
 # lasR 0.21.2
 
+- Fix: queries outside the data extent no longer crash rasterization when
+  only their buffer overlaps the input.
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

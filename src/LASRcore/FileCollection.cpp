@@ -818,7 +818,10 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
 
   // Search if there is a match
   std::vector<int> indexes = file_index.get_overlaps(minx - buffer, miny - buffer,  maxx + buffer, maxy + buffer);
-  if (indexes.empty())
+  // A buffer can overlap a file even when the query itself is entirely outside
+  // the collection. Clipping that query would produce inverted chunk bounds.
+  bool outside = minx > xmax || maxx < xmin || miny > ymax || maxy < ymin;
+  if (indexes.empty() || outside)
   {
     // There is no match, create a placeholder that won't be read
     chunk.clear();
