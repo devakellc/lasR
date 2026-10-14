@@ -1,6 +1,7 @@
 # lasR 0.21.2
 
 - Fix: #338 callback returning R object with multiple files
+- Fix: #270 reusing a triangulation after modifying or deleting points no longer crashes or changes the original surface.
 
 # lasR 0.21.1
 

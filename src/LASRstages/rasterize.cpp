@@ -98,7 +98,7 @@ bool LASRrasterize::process(PointCloud*& las)
     }
 
     std::vector<double> z;
-    if (!p->interpolate(z, &raster)) return false;
+    if (!p->interpolate(z, las, &raster)) return false;
     for (auto i = 0 ; i < raster.get_ncells() ; i++) raster.set_value(i, (float)z[i]);
     return true;
   }

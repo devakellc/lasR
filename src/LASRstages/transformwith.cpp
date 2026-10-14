@@ -166,7 +166,7 @@ bool LASRtransformwith::process(PointCloud*& las)
 
     if (triangulation != nullptr)
     {
-      if (!triangulation->interpolate(hag, nullptr))
+      if (!triangulation->interpolate(hag, las))
         return false;
     }
     else if (rasterization != nullptr)

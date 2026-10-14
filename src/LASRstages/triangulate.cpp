@@ -12,8 +12,6 @@
 
 LASRtriangulate::LASRtriangulate()
 {
-  npoints = 0;
-  las = nullptr;
   d = nullptr;
   vector.set_geometry_type(wkbMultiPolygon25D);
 }
@@ -31,14 +29,12 @@ bool LASRtriangulate::set_parameters(const nlohmann::json& stage)
 
 bool LASRtriangulate::process(PointCloud*& las)
 {
-  this->las = las;
-
   progress->reset();
   progress->set_prefix("Delaunay triangulation");
   progress->set_total(0);
   progress->show();
 
-  std::vector<double> coords;
+  AttributeAccessor accessor(use_attribute);
 
   // Add an angstrom of noise to fix #217
   // Honnextly I don't now why.
@@ -56,8 +52,10 @@ bool LASRtriangulate::process(PointCloud*& las)
     if (pointfilter.filter(p)) continue;
     coords.push_back(p->get_x() - xoffset + noise(gen));
     coords.push_back(p->get_y() - yoffset + noise(gen));
-    index_map.push_back(las->current_point);
-    npoints++;
+    // Downstream stages can edit, reorder or compact the point cloud. Keep
+    // the mesh vertices and interpolation values independent of that storage.
+    vertices.emplace_back(p->get_x(), p->get_y(), p->get_z());
+    values.push_back(accessor(p));
   }
 
   // Other stage that use the triangulation should handle d == nullptr
@@ -79,11 +77,9 @@ bool LASRtriangulate::process(PointCloud*& las)
   return true;
 }
 
-bool LASRtriangulate::interpolate(std::vector<double>& res, const Raster* raster)
+bool LASRtriangulate::interpolate(std::vector<double>& res, PointCloud* points, const Raster* raster)
 {
-  AttributeAccessor accessor(use_attribute);
-
-  int n = (raster == nullptr) ? las->npoints : raster->get_ncells();
+  int n = (raster == nullptr) ? points->npoints : raster->get_ncells();
   res.resize(n);
   std::fill(res.begin(), res.end(), NA_F64);
 
@@ -100,7 +96,8 @@ bool LASRtriangulate::interpolate(std::vector<double>& res, const Raster* raster
   // is not thread safe. We first check that we are in outer thread 0
   bool main_thread = omp_get_thread_num() == 0;
 
-  FastGridPartition2D index(*las);
+  FastGridPartition2D index;
+  if (raster == nullptr) index = FastGridPartition2D(*points);
 
   // 1. loop through the triangles, search the points inside triangle, interpolate
   #pragma omp parallel for num_threads(ncpu)
@@ -108,24 +105,15 @@ bool LASRtriangulate::interpolate(std::vector<double>& res, const Raster* raster
   {
     if (progress->interrupted()) continue;
 
-    int id;
-    Point A,B,C;
-    A.set_schema(&las->header->schema);
-    B.set_schema(&las->header->schema);
-    C.set_schema(&las->header->schema);
-
-    id = index_map[d->triangles[i]];
-    las->get_point(id, &A);
-
-    id = index_map[d->triangles[i+1]];
-    las->get_point(id, &B);
-
-    id = index_map[d->triangles[i+2]];
-    las->get_point(id, &C);
-
-    PointXYZ a(A.get_x(), A.get_y(), accessor(&A));
-    PointXYZ b(B.get_x(), B.get_y(), accessor(&B));
-    PointXYZ c(C.get_x(), C.get_y(), accessor(&C));
+    size_t ia = d->triangles[i];
+    size_t ib = d->triangles[i+1];
+    size_t ic = d->triangles[i+2];
+    PointXYZ a = vertices[ia];
+    PointXYZ b = vertices[ib];
+    PointXYZ c = vertices[ic];
+    a.z = values[ia];
+    b.z = values[ib];
+    c.z = values[ic];
 
     TriangleXYZ triangle(a, b, c);
 
@@ -210,22 +198,9 @@ bool LASRtriangulate::contour(std::vector<Edge>& e) const
   {
     if (progress->interrupted()) continue;
 
-    int id;
-    Point a, b, c;
-    a.set_schema(&las->header->schema);
-    b.set_schema(&las->header->schema);
-    c.set_schema(&las->header->schema);
-
-    id = index_map[d->triangles[i]];
-    las->get_point(id, &a);
-
-    id = index_map[d->triangles[i+1]];
-    las->get_point(id, &b);
-
-    id = index_map[d->triangles[i+2]];
-    las->get_point(id, &c);
-
-    TriangleXYZ triangle(a, b, c);
+    TriangleXYZ triangle(vertices[d->triangles[i]],
+                         vertices[d->triangles[i+1]],
+                         vertices[d->triangles[i+2]]);
 
     bool keep_triangle = (keep_large) ? triangle.square_max_edge_size() > trim : triangle.square_max_edge_size() < trim;
     if (trim == 0 || keep_triangle)
@@ -264,8 +239,6 @@ bool LASRtriangulate::write()
 {
   if (ofile.empty()) return true;
 
-  AttributeAccessor accessor(use_attribute);
-
   progress->set_total(d->triangles.size()/3);
   progress->set_prefix("Write triangulation");
   progress->show();
@@ -276,22 +249,9 @@ bool LASRtriangulate::write()
 
   for (unsigned int i = 0 ; i < d->triangles.size(); i+=3)
   {
-    int id;
-    Point A,B,C;
-    A.set_schema(&las->header->schema);
-    B.set_schema(&las->header->schema);
-    C.set_schema(&las->header->schema);
-
-    id = index_map[d->triangles[i]];
-    las->get_point(id, &A);
-
-    id = index_map[d->triangles[i+1]];
-    las->get_point(id, &B);
-
-    id = index_map[d->triangles[i+2]];
-    las->get_point(id, &C);
-
-    TriangleXYZ triangle(A, B, C);
+    TriangleXYZ triangle(vertices[d->triangles[i]],
+                         vertices[d->triangles[i+1]],
+                         vertices[d->triangles[i+2]]);
 
     bool keep_triangle = (keep_large) ? triangle.square_max_edge_size() > trim : triangle.square_max_edge_size() < trim;
     if (trim == 0 || keep_triangle)
@@ -327,9 +287,9 @@ bool LASRtriangulate::write()
 
 void LASRtriangulate::clear(bool last)
 {
-  coords.clear();
-  index_map.clear();
   delete d;
   d = nullptr;
-  npoints = 0;
+  coords.clear();
+  vertices.clear();
+  values.clear();
 }
