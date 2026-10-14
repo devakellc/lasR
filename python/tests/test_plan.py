@@ -150,7 +150,7 @@ class TestPipelinePlan(unittest.TestCase):
         self.assertIs(report["valid"], True)
         self.assertTrue(self.diagnostics(report, "output_exists", "warning"))
         self.assertEqual(existing.read_bytes(), b"preserve this file")
-        self.assertEqual(list(self.root.iterdir()), [existing])
+        self.assertEqual(os.listdir(self.root), ["existing.tif"])
 
     def test_callbacks_are_not_executed(self):
         called = []
