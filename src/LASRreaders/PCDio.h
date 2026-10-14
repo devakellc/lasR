@@ -25,6 +25,7 @@ public:
   bool read_point(Point* p) override;
   bool write_point(Point* p) override;
   bool is_opened() override;
+  bool finish();
   void close() override;
   void set_binary_mode(bool);
   void reset_accessor() override;

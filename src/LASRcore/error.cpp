@@ -1,8 +1,8 @@
 #include "error.h"
 
 // Definition of global variables
-int last_error_code = 0;
-std::string last_error;
+thread_local int last_error_code = 0;
+thread_local std::string last_error;
 
 #ifdef USING_R
 SEXP make_R_error(const char* message)

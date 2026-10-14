@@ -361,6 +361,7 @@ bool PCDio::write_ascii_point(Point* p)
     }
   }
   ostream << std::endl;
+  if (!ostream) return false;
   npoints++;
   return true;
 }
@@ -437,6 +438,7 @@ bool PCDio::write_binary_point(Point* p)
     }
   }
 
+  if (!ostream) return false;
   npoints++;
   return true;
 }
@@ -453,6 +455,13 @@ int64_t PCDio::p_count()
 
 void PCDio::close()
 {
+  // Destructors perform best-effort cleanup; writers check finish() explicitly.
+  try { finish(); } catch (...) {}
+}
+
+bool PCDio::finish()
+{
+  bool success = true;
   if (istream.is_open())
   {
     istream.close();
@@ -461,9 +470,13 @@ void PCDio::close()
 
   if (ostream.is_open())
   {
+    success = static_cast<bool>(ostream);
     ostream.close();
+    success = static_cast<bool>(ostream) && success;
     header = nullptr;
   }
+
+  return success;
 }
 
 bool PCDio::write_bbox(const Header* header, const std::string &bbox_filename)
@@ -590,6 +603,9 @@ void PCDio::create(const std::string& file)
     ostream << "DATA binary\n";
   else
     ostream << "DATA ascii\n";
+
+  if (!ostream)
+    throw std::runtime_error("Failed to write PCD header: " + file);
 
   if (is_binary)
     write = &PCDio::write_binary_point;

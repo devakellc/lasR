@@ -10,7 +10,7 @@
 class Progress
 {
 public:
-  Progress();
+  explicit Progress(bool reset_interrupt = true);
   ~Progress();
   Progress &operator++(int);
   void create_subprocess();
@@ -43,7 +43,7 @@ private:
   static bool checkUserInterrupt();
   bool check_interrupt_enabled;
   unsigned int interrupt_counter;
-  static bool user_interrupt_event;
+  static std::atomic<bool> user_interrupt_event;
 #endif
 
   // main

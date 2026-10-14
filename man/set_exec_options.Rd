@@ -30,7 +30,8 @@ pick the greatest value between the internal suggestion and this value.}
 It is possible to process in arbitrary-sized chunks. This is useful for e.g., processing collections
 with large files or processing a massive \code{copc} file.}
 
-\item{...}{Other internal options not exposed to users.}
+\item{...}{Additional options, including \code{checkpoint}, \code{resume}, and \code{noread}.
+See the checkpoint and resume section below.}
 }
 \description{
 Set global processing options for the \link{exec} function. By default, pipelines are executed
@@ -64,6 +65,44 @@ set_exec_options(progress = TRUE, ncores = concurrent_files(2))
 exec(pipeline, on = f)
 }
 }
+\section{Checkpoint and resume}{
+
+\code{checkpoint} is a single local directory path. The default, \code{""}, disables
+checkpointing. A fresh run creates this directory, which must not already
+exist; its parent directory and all output parent directories must exist.
+\code{resume} is a single logical value, default \code{FALSE}. Set it to \code{TRUE} to reuse
+an existing compatible checkpoint. It requires a nonempty \code{checkpoint} path.
+\code{noread = TRUE} returns file paths rather than automatically reading raster or
+vector outputs into R objects; its default is \code{FALSE}.
+
+Checkpointing supports immutable local LAS, LAZ, COPC, and PCD inputs, including
+local VPC catalogs. Each output filename must contain exactly one \code{*}, with no
+wildcard in its parent directory. Supported outputs are LAS, LAZ, COPC, PCD,
+GeoTIFF, and GeoPackage. Outputs must be outside the checkpoint directory and
+directories passed as input. A fresh run refuses to overwrite existing outputs.
+
+Supported operations include common classification stages, deterministic
+filters, triangulation, normalization, raster processing, and file writers.
+Unsupported stages are rejected before output files are created. These include
+callbacks, summaries and other in-memory results, external raster or matrix
+loading, stochastic sampling or filters, and tree stages with shared identifiers
+such as local maxima and region growing. Remote inputs, EPT catalogs, and shared
+merged outputs or mosaics are unsupported.
+
+Resume requires the same engine binary and GDAL version, input contents and
+paths, pipeline and output paths, chunking, buffering, core counts, and processing
+strategy. Rebuilding an equivalent pipeline is supported. Inputs and completed
+outputs are checksummed on every start; a missing or modified output causes its
+entire chunk to run again. Keep inputs and the runtime unchanged during a job.
+
+Use a local filesystem with reliable atomic file publication and syncing.
+Only one process can use a checkpoint directory at a time, and each job must
+own its output paths. Checkpointing does not guarantee recovery after power loss
+or on network filesystems. See \link{exec} for a complete start/resume example.
+Global checkpoint settings take precedence over per-call settings; clear them
+with \code{unset_exec_option()} when they are no longer needed.
+}
+
 \seealso{
 \link{multithreading}
 }

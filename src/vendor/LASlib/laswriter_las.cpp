@@ -1289,6 +1289,7 @@ BOOL LASwriterLAS::update_header(const LASheader* header, BOOL use_inventory, BO
 I64 LASwriterLAS::close(BOOL update_npoints)
 {
   I64 bytes = 0;
+  BOOL success = TRUE;
 
   if (p_count != npoints)
   {
@@ -1304,12 +1305,12 @@ I64 LASwriterLAS::close(BOOL update_npoints)
 
   if (writer)
   {
-    writer->done();
+    if (!writer->done()) success = FALSE;
     delete writer;
     writer = 0;
   }
 
-  if (writing_las_1_4 && number_of_extended_variable_length_records)
+  if (success && writing_las_1_4 && number_of_extended_variable_length_records)
   {
     I64 real_start_of_first_extended_variable_length_record = stream->tell();
 
@@ -1333,27 +1334,32 @@ I64 LASwriterLAS::close(BOOL update_npoints)
       if (!stream->put16bitsLE((U8*)&(evlrs[i].reserved)))
       {
         eprint("ERROR: writing evlrs[%d].reserved\n", i);
-        return FALSE;
+        success = FALSE;
+        goto finish_output;
       }
       if (!stream->putBytes((U8*)evlrs[i].user_id, 16))
       {
         eprint("ERROR: writing evlrs[%d].user_id\n", i);
-        return FALSE;
+        success = FALSE;
+        goto finish_output;
       }
       if (!stream->put16bitsLE((U8*)&(evlrs[i].record_id)))
       {
         eprint("ERROR: writing evlrs[%d].record_id\n", i);
-        return FALSE;
+        success = FALSE;
+        goto finish_output;
       }
       if (!stream->put64bitsLE((U8*)&(evlrs[i].record_length_after_header)))
       {
         eprint("ERROR: writing evlrs[%d].record_length_after_header\n", i);
-        return FALSE;
+        success = FALSE;
+        goto finish_output;
       }
       if (!stream->putBytes((U8*)evlrs[i].description, 32))
       {
         eprint("ERROR: writing evlrs[%d].description\n", i);
-        return FALSE;
+        success = FALSE;
+        goto finish_output;
       }
 
       // write the data following the header of the variable length record
@@ -1365,37 +1371,46 @@ I64 LASwriterLAS::close(BOOL update_npoints)
           if (!stream->putBytes((U8*)evlrs[i].data, (U32)evlrs[i].record_length_after_header))
           {
             eprint("ERROR: writing %u bytes of data from evlrs[%d].data\n", (U32)evlrs[i].record_length_after_header, i);
-            return FALSE;
+            success = FALSE;
+            goto finish_output;
           }
         }
         else
         {
           eprint("ERROR: there should be %u bytes of data in evlrs[%d].data\n", (U32)evlrs[i].record_length_after_header, i);
-          return FALSE;
+          success = FALSE;
+          goto finish_output;
         }
       }
 
       if ((strcmp(evlrs[i].user_id, "copc") == 0) && evlrs[i].record_id == 1000)
       {
           copc_root_hier_size = evlrs[i].record_length_after_header;
-          stream->seek(375 + 54 + 40);
-          stream->put64bitsLE((U8*)&copc_root_hier_offset);
-          stream->put64bitsLE((U8*)&copc_root_hier_size);
-          stream->seekEnd();
+          if (!stream->seek(375 + 54 + 40) ||
+              !stream->put64bitsLE((U8*)&copc_root_hier_offset) ||
+              !stream->put64bitsLE((U8*)&copc_root_hier_size) ||
+              !stream->seekEnd())
+          {
+            success = FALSE;
+            goto finish_output;
+          }
       }
     }
 
     if (real_start_of_first_extended_variable_length_record != start_of_first_extended_variable_length_record)
     {
-  	  stream->seek(header_start_position+235);
-  	  stream->put64bitsLE((U8*)&real_start_of_first_extended_variable_length_record);
-      stream->seekEnd();
+      if (!stream->seek(header_start_position+235) ||
+          !stream->put64bitsLE((U8*)&real_start_of_first_extended_variable_length_record) ||
+          !stream->seekEnd()) success = FALSE;
     }
   }
 
+finish_output:
+  // Always release the stream and file, including when delayed EVLR or
+  // compressed-chunk writes fail. Callers can safely clean up again afterward.
   if (stream)
   {
-    if (update_npoints && p_count != npoints)
+    if (success && update_npoints && p_count != npoints)
     {
       if (!stream->isSeekable())
       {
@@ -1427,14 +1442,14 @@ I64 LASwriterLAS::close(BOOL update_npoints)
         {
           number = (U32)p_count;
         }
-	      stream->seek(header_start_position+107);
-	      stream->put32bitsLE((U8*)&number);
+        if (!stream->seek(header_start_position+107) ||
+            !stream->put32bitsLE((U8*)&number)) success = FALSE;
         if (writing_las_1_4)
         {
-  	      stream->seek(header_start_position+235+12);
-  	      stream->put64bitsLE((U8*)&p_count);
+          if (!stream->seek(header_start_position+235+12) ||
+              !stream->put64bitsLE((U8*)&p_count)) success = FALSE;
         }
-        stream->seekEnd();
+        if (!stream->seekEnd()) success = FALSE;
       }
     }
     bytes = stream->tell() - header_start_position;
@@ -1447,14 +1462,17 @@ I64 LASwriterLAS::close(BOOL update_npoints)
 
   if (file)
   {
-    fclose(file);
+    // Buffered writes may fail only during fclose(), and earlier fwrite()
+    // errors remain recorded even if later seeks or writes succeed.
+    if (ferror(file)) success = FALSE;
+    if (fclose(file) != 0) success = FALSE;
     file = 0;
   }
 
   npoints = p_count;
   p_count = 0;
 
-  return bytes;
+  return success ? bytes : -1;
 }
 
 I64 LASwriterLAS::tell()

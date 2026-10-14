@@ -26,6 +26,27 @@ Process the pipeline. Every other functions of the package do nothing. This func
 called on a pipeline in order to actually process the point-cloud. To process in parallel using
 multiple cores, refer to the \link{multithreading} page.
 }
+\section{Checkpoint and resume}{
+
+Use \code{checkpoint = "new-directory"} to record completed chunks of a supported
+pipeline that writes separate output files. The checkpoint directory must not
+exist on a fresh run. Create the output parent directories first, use exactly
+one \code{*} in each output filename, and choose output paths that do not exist.
+Outputs must be outside the checkpoint directory and directories passed as input.
+
+After an interruption, rebuild the same pipeline and use the same checkpoint
+with \code{resume = TRUE}. Input contents and paths, output paths, pipeline settings,
+chunking, buffering, processing strategy, core counts, engine binary, and GDAL
+version must remain unchanged. Rebuilt stage identifiers do not prevent reuse.
+Completed chunks are reused only after their output checksums are verified;
+unfinished chunks and chunks with missing or modified outputs run again.
+
+Set \code{noread = TRUE} to return the complete ordered output paths, including
+those completed by an earlier execution. Empty chunks are recorded without
+inventing output files. Input and completed-output checksums add disk I/O on
+every start. See \link{set_exec_options} for defaults and supported workflows.
+}
+
 \examples{
 \dontrun{
 f <- paste0(system.file(package="lasR"), "/extdata/bcts/")
@@ -38,6 +59,19 @@ lmf <- local_maximum(5)
 met <- rasterize(2, "imean")
 pipeline <- read + tri + dtm + lmf + met
 ans <- exec(pipeline, on = f, with = list(progress = TRUE))
+
+# A separate file for each chunk, with a persistent checkpoint.
+job <- tempfile("lasr-job-")
+dir.create(job)
+dir.create(file.path(job, "outputs"))
+input <- system.file("extdata", "Example.las", package = "lasR")
+output <- file.path(job, "outputs", "*.laz")
+options <- list(checkpoint = file.path(job, "checkpoint"),
+                ncores = sequential(), noread = TRUE)
+first <- exec(write_las(output), on = input, with = options)
+options$resume <- TRUE
+resumed <- exec(write_las(output), on = input, with = options)
+stopifnot(identical(first, resumed))
 }
 }
 \seealso{

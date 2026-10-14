@@ -183,6 +183,8 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   std::string profile_file = "";
   std::string progress_file = "";
   std::string log_file = "";
+  std::string checkpoint = "";
+  bool resume = false;
   std::vector<int> ncores = {1, 0};
   std::vector<bool> noprocess;
 
@@ -202,6 +204,8 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   update_if_present(profile_file, "profile_file");
   update_if_present(progress_file, "progress_file");
   update_if_present(log_file, "log_file");
+  update_if_present(checkpoint, "checkpoint");
+  update_if_present(resume, "resume");
   update_if_present(ncores, "ncores");
   update_if_present(noprocess, "noprocess");
 
@@ -218,6 +222,7 @@ std::string generate_json(SEXP ptr, std::vector<std::string> on, Rcpp::List with
   p.set_profile_file("");
   p.set_noprocess(noprocess);
   p.set_log_file(log_file);
+  p.set_checkpoint(checkpoint, resume);
   p.set_progress_file(progress_file);
   p.set_profile_file(profile_file);
 

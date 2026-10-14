@@ -120,7 +120,15 @@ bool LASRlaswriter::process(Point*& p)
        }
        }*/
 
-      lasio->write_point(p);
+      try
+      {
+        if (!lasio->write_point(p)) return false;
+      }
+      catch (const std::exception& e)
+      {
+        last_error = e.what();
+        return false;
+      }
     }
   }
 
@@ -189,6 +197,23 @@ bool LASRlaswriter::set_chunk(Chunk& chunk)
   if (chunk.buffer == 0) keep_buffer = true;
   circular = chunk.shape == ShapeType::CIRCLE;
   return true;
+}
+
+bool LASRlaswriter::write()
+{
+  // Merged writers stay open across chunks. A separate output must be fully
+  // flushed before Engine::run() can report success for this chunk.
+  if (merged || lasio == nullptr) return true;
+  try
+  {
+    if (lasio->finish()) return true;
+    last_error = "Failed to finalize LAS output: " + ofile;
+  }
+  catch (const std::exception& e)
+  {
+    last_error = e.what();
+  }
+  return false;
 }
 
 void LASRlaswriter::clear(bool last)

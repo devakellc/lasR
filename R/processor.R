@@ -15,6 +15,25 @@
 #' @param ... The processing options can be explicitly named and passed outside the `with` argument.
 #' See \link{set_exec_options}
 #'
+#' @section Checkpoint and resume:
+#' Use `checkpoint = "new-directory"` to record completed chunks of a supported
+#' pipeline that writes separate output files. The checkpoint directory must not
+#' exist on a fresh run. Create the output parent directories first, use exactly
+#' one `*` in each output filename, and choose output paths that do not exist.
+#' Outputs must be outside the checkpoint directory and directories passed as input.
+#'
+#' After an interruption, rebuild the same pipeline and use the same checkpoint
+#' with `resume = TRUE`. Input contents and paths, output paths, pipeline settings,
+#' chunking, buffering, processing strategy, core counts, engine binary, and GDAL
+#' version must remain unchanged. Rebuilt stage identifiers do not prevent reuse.
+#' Completed chunks are reused only after their output checksums are verified;
+#' unfinished chunks and chunks with missing or modified outputs run again.
+#'
+#' Set `noread = TRUE` to return the complete ordered output paths, including
+#' those completed by an earlier execution. Empty chunks are recorded without
+#' inventing output files. Input and completed-output checksums add disk I/O on
+#' every start. See [set_exec_options] for defaults and supported workflows.
+#'
 #' @seealso [multithreading] [set_exec_options]
 #' @examples
 #' \dontrun{
@@ -28,6 +47,19 @@
 #' met <- rasterize(2, "imean")
 #' pipeline <- read + tri + dtm + lmf + met
 #' ans <- exec(pipeline, on = f, with = list(progress = TRUE))
+#'
+#' # A separate file for each chunk, with a persistent checkpoint.
+#' job <- tempfile("lasr-job-")
+#' dir.create(job)
+#' dir.create(file.path(job, "outputs"))
+#' input <- system.file("extdata", "Example.las", package = "lasR")
+#' output <- file.path(job, "outputs", "*.laz")
+#' options <- list(checkpoint = file.path(job, "checkpoint"),
+#'                 ncores = sequential(), noread = TRUE)
+#' first <- exec(write_las(output), on = input, with = options)
+#' options$resume <- TRUE
+#' resumed <- exec(write_las(output), on = input, with = options)
+#' stopifnot(identical(first, resumed))
 #' }
 #' @md
 #' @export
@@ -194,6 +226,8 @@ parse_options = function(on, with, ...)
   profile_file <- ""
   progress_file <- ""
   log_file <- ""
+  checkpoint <- ""
+  resume <- FALSE
 
   # Explicit options
   if (!is.null(dots[["buffer"]])) buffer <- dots[["buffer"]]
@@ -206,6 +240,8 @@ parse_options = function(on, with, ...)
   if (!is.null(dots[["profile_file"]])) profile_file <- dots[["profile_file"]]
   if (!is.null(dots[["progress_file"]])) progress_file <- dots[["progress_file"]]
   if (!is.null(dots[["log_file"]])) log_file <- dots[["log_file"]]
+  if (!is.null(dots[["checkpoint"]])) checkpoint <- dots[["checkpoint"]]
+  if (!is.null(dots[["resume"]])) resume <- dots[["resume"]]
 
   # 'with' list has precedence
   if (!is.null(with[["buffer"]])) buffer <- with[["buffer"]]
@@ -218,6 +254,8 @@ parse_options = function(on, with, ...)
   if (!is.null(with[["profile_file"]])) profile_file <- with[["profile_file"]]
   if (!is.null(with[["progress_file"]])) progress_file <- with[["progress_file"]]
   if (!is.null(with[["log_file"]])) log_file <- with[["log_file"]]
+  if (!is.null(with[["checkpoint"]])) checkpoint <- with[["checkpoint"]]
+  if (!is.null(with[["resume"]])) resume <- with[["resume"]]
 
   if (!missing(on))
   {
@@ -260,6 +298,8 @@ parse_options = function(on, with, ...)
   if (!is.null(LASROPTIONS[["noread"]])) noread <- LASROPTIONS[["noread"]]
   if (!is.null(LASROPTIONS[["progress_file"]])) progress_file <- LASROPTIONS[["progress_file"]]
   if (!is.null(LASROPTIONS[["log_file"]])) log_file <- LASROPTIONS[["log_file"]]
+  if (!is.null(LASROPTIONS[["checkpoint"]])) checkpoint <- LASROPTIONS[["checkpoint"]]
+  if (!is.null(LASROPTIONS[["resume"]])) resume <- LASROPTIONS[["resume"]]
 
   if (!has_omp_support())
   {
@@ -278,6 +318,9 @@ parse_options = function(on, with, ...)
   stopifnot(is.character(progress_file))
   stopifnot(is.character(log_file))
   stopifnot(is.character(profile_file))
+  stopifnot(is.character(checkpoint), length(checkpoint) == 1L, !is.na(checkpoint))
+  stopifnot(is.logical(resume), length(resume) == 1L, !is.na(resume))
+  if (resume && !nzchar(checkpoint)) stop("resume requires a checkpoint directory")
 
   ret = list(
     ncores = ncores,
@@ -290,7 +333,9 @@ parse_options = function(on, with, ...)
     verbose = verbose,
     profile_file = profile_file,
     progress_file = progress_file,
-    log_file = log_file
+    log_file = log_file,
+    checkpoint = checkpoint,
+    resume = resume
   )
 
   return(ret)
@@ -338,7 +383,43 @@ parse_options = function(on, with, ...)
 #' @param chunk numeric. By default, the collection of files is processed by file (`chunk = NULL` or `chunk = 0`).
 #' It is possible to process in arbitrary-sized chunks. This is useful for e.g., processing collections
 #' with large files or processing a massive `copc` file.
-#' @param ... Other internal options not exposed to users.
+#' @param ... Additional options, including `checkpoint`, `resume`, and `noread`.
+#' See the checkpoint and resume section below.
+#' @section Checkpoint and resume:
+#' `checkpoint` is a single local directory path. The default, `""`, disables
+#' checkpointing. A fresh run creates this directory, which must not already
+#' exist; its parent directory and all output parent directories must exist.
+#' `resume` is a single logical value, default `FALSE`. Set it to `TRUE` to reuse
+#' an existing compatible checkpoint. It requires a nonempty `checkpoint` path.
+#' `noread = TRUE` returns file paths rather than automatically reading raster or
+#' vector outputs into R objects; its default is `FALSE`.
+#'
+#' Checkpointing supports immutable local LAS, LAZ, COPC, and PCD inputs, including
+#' local VPC catalogs. Each output filename must contain exactly one `*`, with no
+#' wildcard in its parent directory. Supported outputs are LAS, LAZ, COPC, PCD,
+#' GeoTIFF, and GeoPackage. Outputs must be outside the checkpoint directory and
+#' directories passed as input. A fresh run refuses to overwrite existing outputs.
+#'
+#' Supported operations include common classification stages, deterministic
+#' filters, triangulation, normalization, raster processing, and file writers.
+#' Unsupported stages are rejected before output files are created. These include
+#' callbacks, summaries and other in-memory results, external raster or matrix
+#' loading, stochastic sampling or filters, and tree stages with shared identifiers
+#' such as local maxima and region growing. Remote inputs, EPT catalogs, and shared
+#' merged outputs or mosaics are unsupported.
+#'
+#' Resume requires the same engine binary and GDAL version, input contents and
+#' paths, pipeline and output paths, chunking, buffering, core counts, and processing
+#' strategy. Rebuilding an equivalent pipeline is supported. Inputs and completed
+#' outputs are checksummed on every start; a missing or modified output causes its
+#' entire chunk to run again. Keep inputs and the runtime unchanged during a job.
+#'
+#' Use a local filesystem with reliable atomic file publication and syncing.
+#' Only one process can use a checkpoint directory at a time, and each job must
+#' own its output paths. Checkpointing does not guarantee recovery after power loss
+#' or on network filesystems. See [exec] for a complete start/resume example.
+#' Global checkpoint settings take precedence over per-call settings; clear them
+#' with `unset_exec_option()` when they are no longer needed.
 #' @seealso [multithreading]
 #' @export
 #' @md
@@ -357,6 +438,8 @@ set_exec_options = function(ncores = NULL, progress = NULL, buffer = NULL, chunk
   LASROPTIONS$buffer <- buffer
   LASROPTIONS$noread <- dots$noread
   LASROPTIONS$noprocess <- dots$noprocess
+  LASROPTIONS$checkpoint <- dots$checkpoint
+  LASROPTIONS$resume <- dots$resume
   LASROPTIONS$verbose <- dots$verbose
 }
 
@@ -369,6 +452,8 @@ unset_exec_option = function()
   LASROPTIONS$buffer <- NULL
   LASROPTIONS$noread <- NULL
   LASROPTIONS$noprocess <- NULL
+  LASROPTIONS$checkpoint <- NULL
+  LASROPTIONS$resume <- NULL
   LASROPTIONS$verbose <- NULL
 }
 

@@ -50,6 +50,11 @@ public:
   void show_profiling(const std::string& path);
   void set_progress(Progress* progress);
   FileCollection* get_catalog() const { return catalog.get(); };
+  // Checkpoint execution uses a fresh clone per chunk. File results are restored
+  // in catalog order, including results from chunks completed in earlier runs.
+  void checkpoint_redirect(const std::map<std::string, std::string>& outputs);
+  std::map<std::string, std::vector<std::string>> checkpoint_outputs() const;
+  void checkpoint_restore(const std::map<std::string, std::vector<std::string>>& outputs);
 
 #ifdef USING_R
   SEXP to_R();

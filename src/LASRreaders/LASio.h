@@ -30,6 +30,7 @@ public:
   bool write_point(Point* p) override;
   void write_lax(const std::string& file, bool overwrite, bool embedded, IProgress* progress = nullptr);
   bool is_opened() override;
+  bool finish();
   void close() override;
   void reset_accessor() override;
   void set_copc_max_depth(int depth);

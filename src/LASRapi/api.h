@@ -158,6 +158,8 @@ public:
   void set_progress_file(const std::string& path) { opt_progress_file = path; };
   void set_log_file(const std::string& path) { opt_log_file = path; };
   void set_noprocess(const std::vector<bool>&);
+  void set_checkpoint(const std::string& path, bool resume = false)
+  { opt_checkpoint = path; opt_resume = resume; }
 
   bool has_reader() const;
   bool has_catalog() const;
@@ -183,9 +185,12 @@ private:
   std::string opt_profiling_file = "";
   std::string opt_progress_file = "";
   std::string opt_log_file = "";
+  std::string opt_checkpoint = "";
+  bool opt_resume = false;
 };
 
 ReturnType execute(const std::string& config_file);
+ReturnType execute_checkpoint(nlohmann::json config);
 PipelineInfo pipeline_info(const std::string& config_file);
 
 Pipeline add_attribute(std::string data_type, std::string name, std::string description, double scale = 1, double offset = 0);

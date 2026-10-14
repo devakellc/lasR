@@ -2,8 +2,8 @@
 #define ERROR_H
 
 #include <string>
-extern int last_error_code;
-extern std::string last_error;
+extern thread_local int last_error_code;
+extern thread_local std::string last_error;
 
 #ifdef USING_R
 #define R_NO_REMAP 1

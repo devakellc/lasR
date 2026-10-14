@@ -16,6 +16,7 @@ public:
   bool set_output_file(const std::string& file) override;
   bool process(Point*& p) override;
   bool process(PointCloud*& las) override;
+  bool write() override;
   bool is_streamable() const override { return false; };
   void clear(bool last) override;
   bool set_parameters(const nlohmann::json&) override;

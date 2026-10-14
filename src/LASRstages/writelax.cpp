@@ -2,6 +2,7 @@
 #include "macros.h"
 
 #include "LASio.h"
+#include <atomic>
 
 class ProgressAdapter : public IProgress
 {
@@ -42,10 +43,11 @@ bool LASRlaxwriter::process(FileCollection*& ctg)
 {
   if (onthefly) return true;
 
-  bool success = true;
+  std::atomic<bool> success(true);
+  std::string worker_error;
   const auto& files = ctg->get_files();
 
-  Progress progress;
+  Progress progress(false);
   Progress* current = this->progress;
   progress.set_prefix("Pre-processing");
   progress.set_total(files.size());
@@ -71,8 +73,10 @@ bool LASRlaxwriter::process(FileCollection*& ctg)
     }
     catch (const std::exception& e)
     {
-      last_error = e.what();
-      success = false;
+      #pragma omp critical (lax_error)
+      {
+        if (success.exchange(false)) worker_error = e.what();
+      }
     }
 
     #pragma omp critical
@@ -82,7 +86,8 @@ bool LASRlaxwriter::process(FileCollection*& ctg)
     }
   }
 
-  ctg->set_all_indexed();
+  if (success) ctg->set_all_indexed();
+  else last_error = worker_error;
 
   progress.done();
   progress.done(true);

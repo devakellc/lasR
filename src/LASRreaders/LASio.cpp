@@ -2,6 +2,7 @@
 
 #include "lasreader.hpp"
 #include "laswriter.hpp"
+#include "laswriter_copc.hpp"
 #include "laszip_decompress_selective_v3.hpp"
 #include "lasindex.hpp"
 #include "lasquadtree.hpp"
@@ -584,7 +585,8 @@ bool LASio::write_point(Point* p)
   for (size_t i = 0 ; i < extrabytes_offsets.size() ; i++)
     point->set_attribute(i, p->data + extrabytes_offsets[i]);
 
-  laswriter->write_point(point);
+  if (!laswriter->write_point(point))
+    throw std::runtime_error("Failed to write a LAS point");
   laswriter->update_inventory(point);
 
   return true;
@@ -693,6 +695,14 @@ int64_t LASio::p_count()
 
 void LASio::close()
 {
+  // Cleanup is also called from destructors. The processing path calls finish()
+  // explicitly so a failed flush is reported before a chunk is marked complete.
+  try { finish(); } catch (...) {}
+}
+
+bool LASio::finish()
+{
+  bool success = true;
   if (lasreader)
   {
     lasreader->close();
@@ -703,14 +713,19 @@ void LASio::close()
 
   if (laswriter)
   {
-    laswriter->update_header(lasheader, true);
-    laswriter->close();
+    // COPC deliberately rejects update_header(): it builds and writes its
+    // final header inside close(), after constructing the octree.
+    if (dynamic_cast<LASwriterCOPC*>(laswriter) == nullptr)
+      success = laswriter->update_header(lasheader, true);
+    if (laswriter->close() <= 0) success = false;
     delete laswriter;
     laswriter = nullptr;
-
-    delete lasheader;
-    lasheader = nullptr;
   }
+
+  // init() can allocate a writer header without ever creating an output file.
+  // Reader headers have already been released and nulled above.
+  delete lasheader;
+  lasheader = nullptr;
 
   if (lasreadopener)
   {
@@ -729,6 +744,8 @@ void LASio::close()
     delete point;
     point = nullptr;
   }
+
+  return success;
 }
 
 void LASio::reset_accessor()
