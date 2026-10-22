@@ -2,6 +2,7 @@
 
 - New: `reader()` accepts several EPT endpoints
 - New: a pipeline can read LAS files and EPT endpoints together
+- New: sources with different scale or offset are merged in one chunk
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

@@ -32,6 +32,7 @@ protected:
 
 private:
   Header* header;
+  std::vector<Header> others;
   size_t current_source;
   bool streaming;
 };
