@@ -533,7 +533,9 @@ PYBIND11_MODULE(pylasr, m) {
           py::arg("res") = 1.0, py::arg("ws") = 3.0, py::arg("min_height") = 2.0,
           py::arg("layer_thickness") = 0.5, py::arg("dist_2d") = 3.0, py::arg("dist_3d") = 5.0,
           py::arg("use_max") = false,
-          py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "");
+          py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "",
+          py::arg("ws_lut") = std::vector<double>{}, py::arg("ws_lut_min") = 0.0,
+          py::arg("ws_lut_step") = 0.5);
 
     m.def("callback", [](py::object fun, const std::string& expose, py::object args, bool drop_buffer, bool no_las_update) {
         if (!py::hasattr(fun, "__call__"))

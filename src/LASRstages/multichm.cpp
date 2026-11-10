@@ -18,7 +18,7 @@ static float percentile95(const float* x, uint32_t n)
   return lo + (hi - lo) * frac;
 }
 
-// The window is circular and its size is fixed. Compute the offsets once
+// Offsets of the largest window, nearest first
 static std::vector<std::pair<int,int>> build_window(double ws, double res)
 {
   double hws = ws/2;
@@ -33,6 +33,11 @@ static std::vector<std::pair<int,int>> build_window(double ws, double res)
       if ((dc*dc + dr*dr)*res*res <= hws*hws) window.emplace_back(dr, dc);
     }
   }
+
+  std::stable_sort(window.begin(), window.end(), [](const std::pair<int,int>& a, const std::pair<int,int>& b)
+  {
+    return a.first*a.first + a.second*a.second < b.first*b.first + b.second*b.second;
+  });
 
   return window;
 }
@@ -51,9 +56,46 @@ LASRmultichm::LASRmultichm()
   unicity_table = std::make_shared<std::unordered_map<uint64_t, unsigned int>>();
 }
 
+double LASRmultichm::window_at(double v) const
+{
+  if (!variable_ws) return ws;
+
+  double pos = (v - ws_lut_min) / ws_lut_step;
+  if (pos <= 0) return ws_lut.front();
+  if (pos >= (double)(ws_lut.size() - 1)) return ws_lut.back();
+
+  size_t i = (size_t)pos;
+  double frac = pos - (double)i;
+  return ws_lut[i] * (1.0 - frac) + ws_lut[i + 1] * frac;
+}
+
 bool LASRmultichm::set_parameters(const nlohmann::json& stage)
 {
   ws = stage.at("ws");
+  variable_ws = stage.contains("ws_lut") && !stage.at("ws_lut").empty();
+  if (variable_ws)
+  {
+    ws_lut = stage.at("ws_lut").get<std::vector<double>>();
+    ws_lut_min = stage.value("ws_lut_min", 0.0);
+    ws_lut_step = stage.value("ws_lut_step", 0.5);
+
+    if (ws_lut_step <= 0)
+    {
+      last_error = "ws_lut_step must be > 0";
+      return false;
+    }
+    for (double r : ws_lut)
+    {
+      if (!std::isfinite(r) || r <= 0)
+      {
+        last_error = "ws_lut must contain only finite positive values";
+        return false;
+      }
+    }
+
+    max_ws = *std::max_element(ws_lut.begin(), ws_lut.end());
+  }
+
   res = stage.value("res", 1.0);
   min_height = stage.value("min_height", 2.0);
   layer_thickness = stage.value("layer_thickness", 0.5);
@@ -61,7 +103,7 @@ bool LASRmultichm::set_parameters(const nlohmann::json& stage)
   dist_3d = stage.value("dist_3d", 5.0);
   use_max = stage.value("use_max", false);
 
-  if (res <= 0 || ws <= 0 || layer_thickness <= 0 || dist_2d <= 0 || dist_3d <= 0)
+  if (res <= 0 || (!variable_ws && ws <= 0) || layer_thickness <= 0 || dist_2d <= 0 || dist_3d <= 0)
   {
     last_error = "res, ws, layer_thickness, dist_2d and dist_3d must be positive";
     return false;
@@ -97,7 +139,7 @@ bool LASRmultichm::process(PointCloud*& las)
             ROUNDANY(xmax - 0.5*res, res) + res + nbuffer*res,
             ROUNDANY(ymax - 0.5*res, res) + res + nbuffer*res, res);
 
-  window = build_window(ws, res);
+  window = build_window(variable_ws ? max_ws : ws, res);
   if (!build_index(las, grid)) return false;
 
   std::vector<Maximum> maxima;
@@ -262,11 +304,16 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
     int row = c/ncols;
     int col = c%ncols;
     bool is_max = true;
+    double hws = window_at(v)/2;
 
     for (size_t w = 0 ; w < window.size() && is_max ; w++)
     {
-      int rr = row + window[w].first;
-      int cc = col + window[w].second;
+      int dr = window[w].first;
+      int dc = window[w].second;
+      if ((dc*dc + dr*dr)*res*res > hws*hws) break;
+
+      int rr = row + dr;
+      int cc = col + dc;
       if (rr < 0 || rr >= nrows || cc < 0 || cc >= ncols) continue;
 
       int j = rr*ncols + cc;

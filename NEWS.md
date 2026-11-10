@@ -2,6 +2,7 @@
 
 - New: `reader()` accepts several EPT endpoints
 - New: a pipeline can read LAS files and EPT endpoints together
+- New: `multichm()` accepts `ws` as a function for a variable-size window, like `local_maximum()`
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

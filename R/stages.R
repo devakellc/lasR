@@ -816,7 +816,9 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 #' `dist_2d` in 2D and `dist_3d` in 3D.
 #'
 #' @param res numeric. Resolution of the intermediate CHMs.
-#' @param ws numeric. Diameter of the circular moving window used to detect the local maxima on each CHM.
+#' @param ws numeric or function. Diameter of the circular moving window used to detect the local
+#' maxima on each CHM. A function gives a variable window, as in [local_maximum()]: it receives the
+#' height of the CHM cell and returns the window diameter.
 #' @param min_height numeric. Threshold below which a local maximum cannot be a tree.
 #' @param layer_thickness numeric. Thickness of the band removed below the current CHM at each iteration.
 #' @param dist_2d numeric. 2D distance threshold below which a candidate is discarded.
@@ -843,7 +845,11 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 multichm = function(res = 1, ws = 3, min_height = 2, layer_thickness = 0.5, dist_2d = 3, dist_3d = 5, use_max = FALSE, filter = "", ofile = tempgpkg())
 {
   ofile = normalizePath(ofile, mustWork = FALSE)
-  .APISTAGES$multichm(res, ws, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile)
+  lut = .build_ws_lut(ws)
+  if (is.null(lut))
+    return(.APISTAGES$multichm(res, ws, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile, numeric(0), 0, 0.5))
+
+  .APISTAGES$multichm(res, 0, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile, lut$lut, lut$min, lut$step)
 }
 
 # ===== N ====
