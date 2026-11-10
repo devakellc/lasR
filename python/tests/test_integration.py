@@ -727,6 +727,24 @@ class TestMultichm(unittest.TestCase):
         points = sorted(read_points(ofile))
         self.assertEqual([round(p[0], 1) for p in points], [100.5, 106.5, 112.5])
 
+    def test_variable_window(self):
+        """The window follows the height: a short tree 3 m from a tall one survives, a tall
+        one 4 m from it does not. Neither fixed window gives that"""
+        las = os.path.join(self.temp_dir, "vwf.las")
+        write_las(las, [100.5, 103.5, 96.5, 90.0, 110.0], [100.5] * 3 + [90.0, 110.0], [20.0, 8.0, 19.0, 0.0, 0.0])
+
+        def run(name, **window):
+            ofile = os.path.join(self.temp_dir, f"out_{name}.gpkg")
+            pipeline = pylasr.multichm(res=1.0, min_height=2.0, dist_2d=1.0, dist_3d=1.0, ofile=ofile, **window)
+            result = pylasr.execute(pipeline, [las])
+            self.assertTrue(result["success"], result.get("message"))
+            return sorted(round(p[0], 1) for p in read_points(ofile))
+
+        lut = [5.0] * 11 + [5.0 + 0.4 * i for i in range(1, 11)]
+        self.assertEqual(run("lut", ws=0.0, ws_lut=lut, ws_lut_step=1.0), [100.5, 103.5])
+        self.assertEqual(run("small", ws=5.0), [96.5, 100.5, 103.5])
+        self.assertEqual(run("large", ws=9.0), [100.5])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

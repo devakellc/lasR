@@ -18,7 +18,7 @@ public:
   bool process(PointCloud*& las) override;
   bool write() override;
   void clear(bool last) override;
-  double need_buffer() const override { return MAX3(ws, dist_2d, dist_3d); };
+  double need_buffer() const override { return MAX3(variable_ws ? max_ws : ws, dist_2d, dist_3d); };
   bool set_parameters(const nlohmann::json&) override;
   std::string get_name() const override { return "multichm"; };
   std::vector<PointLAS>& get_maxima() override { return lm; };
@@ -35,6 +35,7 @@ private:
   void find_maxima(const Grid& grid, std::vector<Maximum>& maxima);
   void select_trees(std::vector<Maximum>& maxima) const;
   void record(const std::vector<Maximum>& trees, const Header* header);
+  double window_at(double v) const;
 
   double res;
   double ws;
@@ -43,6 +44,12 @@ private:
   double dist_2d;
   double dist_3d;
   bool use_max;
+
+  bool variable_ws = false;
+  std::vector<double> ws_lut;
+  double ws_lut_min = 0;
+  double ws_lut_step = 0.5;
+  double max_ws = 0;
 
   // The heights are grouped by cell in 'z' and sorted. The peeling threshold is the same for every
   // point of a cell so the points alive are always a prefix of the run. 'k' is its length.
