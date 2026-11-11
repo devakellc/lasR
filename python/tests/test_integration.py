@@ -458,12 +458,29 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         pipeline = query + pylasr.sampling_pixel(res=2.0) + pylasr.summarise()
         self.assertGreater(_npoints(pylasr.execute(pipeline, [EPT, las])), 0)
 
-    def test_mismatched_scale_is_refused(self):
-        topography = os.path.normpath(os.path.join(os.path.dirname(EPT), "..", "Topography.las"))
+    def _xyz(self, files):
+        out = os.path.join(self.temp_dir, "out.las")
         query = pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
-        with self.assertRaises(Exception) as ctx:
-            pylasr.execute(query + pylasr.summarise(), [EPT, topography])
-        self.assertIn("scale or offset", str(ctx.exception))
+        pylasr.execute(query + pylasr.write_las(out), files)
+        with open(out, "rb") as f:
+            raw = f.read()
+        start, = struct.unpack_from("<I", raw, 96)
+        size, = struct.unpack_from("<H", raw, 105)
+        scale = struct.unpack_from("<3d", raw, 131)
+        offset = struct.unpack_from("<3d", raw, 155)
+        points = []
+        for i in range(start, len(raw), size):
+            xyz = struct.unpack_from("<3i", raw, i)
+            points.append(tuple(round(v * s + o, 5) for v, s, o in zip(xyz, scale, offset)))
+        return points
+
+    def test_sources_with_different_scale_merge(self):
+        # Topography.las is quantized at 0.00025 with an offset, the EPT tiles at 0.01 without
+        topography = os.path.normpath(os.path.join(os.path.dirname(EPT), "..", "Topography.las"))
+        merged = self._xyz([EPT, topography])
+        expected = self._xyz(EPT) + self._xyz(topography)
+        self.assertEqual(len(merged), len(expected))
+        self.assertEqual(set(merged) ^ set(expected), set())
 
     def test_write_lax_skips_ept_endpoints_called_directly(self):
         # write_lax(), called directly rather than auto-inserted for a buffered stage,

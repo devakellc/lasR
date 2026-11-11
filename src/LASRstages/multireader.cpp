@@ -2,10 +2,26 @@
 
 #include "Fileio.h"
 
+#include <cmath>
+
 // Same name with another type, scale or offset would be decoded against the wrong Attribute
 static bool same_representation(const Attribute& a, const Attribute& b)
 {
   return a.type == b.type && a.scale_factor == b.scale_factor && a.value_offset == b.value_offset;
+}
+
+static bool same_quantization(const Header& a, const Header* b)
+{
+  return a.x_scale_factor == b->x_scale_factor && a.y_scale_factor == b->y_scale_factor && a.z_scale_factor == b->z_scale_factor &&
+         a.x_offset == b->x_offset && a.y_offset == b->y_offset && a.z_offset == b->z_offset;
+}
+
+// The source wrote its own integer coordinates
+static void requantize(Point* p, const Header& from, const Header* to)
+{
+  p->set_X((int)std::round((p->get_X() * from.x_scale_factor + from.x_offset - to->x_offset) / to->x_scale_factor));
+  p->set_Y((int)std::round((p->get_Y() * from.y_scale_factor + from.y_offset - to->y_offset) / to->y_scale_factor));
+  p->set_Z((int)std::round((p->get_Z() * from.z_scale_factor + from.z_offset - to->z_offset) / to->z_scale_factor));
 }
 
 LASRmultireader::LASRmultireader()
@@ -56,23 +72,11 @@ bool LASRmultireader::process(Header*& header)
     sources[0].second->populate_header(header);
 
     int64_t npoints = header->number_of_point_records;
-    std::vector<Header> others(sources.size() - 1);
+    others = std::vector<Header>(sources.size() - 1);
     for (size_t i = 1 ; i < sources.size() ; i++)
     {
       Header& other = others[i-1];
       sources[i].second->populate_header(&other);
-
-      if (other.x_scale_factor != header->x_scale_factor ||
-          other.y_scale_factor != header->y_scale_factor ||
-          other.z_scale_factor != header->z_scale_factor ||
-          other.x_offset != header->x_offset ||
-          other.y_offset != header->y_offset ||
-          other.z_offset != header->z_offset)
-      {
-        last_error = "sources with different scale or offset cannot be merged";
-        return false;
-      }
-
       npoints += other.number_of_point_records;
     }
     header->number_of_point_records = npoints;
@@ -82,11 +86,13 @@ bool LASRmultireader::process(Header*& header)
       AttributeSchema merged;
       for (const auto& attribute : header->schema.attributes)
       {
+        // X Y Z are requantized
+        bool xyz = attribute.name == "X" || attribute.name == "Y" || attribute.name == "Z";
         bool in_all = true;
         for (const auto& other : others)
         {
           const Attribute* match = other.schema.find_attribute(attribute.name);
-          if (!match || !same_representation(*match, attribute)) { in_all = false; break; }
+          if (!match || (!xyz && !same_representation(*match, attribute))) { in_all = false; break; }
         }
 
         if (in_all) merged.add_attribute(attribute);
@@ -122,6 +128,9 @@ bool LASRmultireader::process(Point*& point)
 
     if (got)
     {
+      if (current_source > 0 && !same_quantization(others[current_source-1], header))
+        requantize(point, others[current_source-1], header);
+
       position = aoi_position(point->get_x(), point->get_y());
       if (position != AOI_INSIDE || point->inside_buffer(xmin, ymin, xmax, ymax, circular))
         point->set_buffered();
@@ -151,11 +160,15 @@ bool LASRmultireader::process(PointCloud*& las)
   Point p(&header->schema);
 
   int64_t read = 0;
-  for (auto& source : sources)
+  for (size_t i = 0 ; i < sources.size() ; i++)
   {
+    auto& source = sources[i];
+    bool rescale = i > 0 && !same_quantization(others[i-1], header);
+
     while (source.second->read_point(&p))
     {
       if (progress->interrupted()) break;
+      if (rescale) requantize(&p, others[i-1], header);
       if (pointfilter.filter(&p)) continue;
 
       AOIposition position = aoi_position(p.get_x(), p.get_y());
