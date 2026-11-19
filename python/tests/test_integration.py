@@ -389,6 +389,14 @@ class TestMultipleEptEndpoints(unittest.TestCase):
         self.assertEqual(one, 73396)
         self.assertEqual(two, 2 * one)
 
+    def test_thirty_endpoints_read_them_all(self):
+        """Thirty sources over the same ground: every one is read, and they merge in one chunk"""
+        one = _npoints(pylasr.execute(
+            pylasr.reader_coverage() + pylasr.summarise(), EPT))
+        many = _npoints(pylasr.execute(
+            pylasr.reader_coverage() + pylasr.summarise(), [EPT] * 30))
+        self.assertEqual(many, 30 * one)
+
     def test_two_endpoints_under_a_query(self):
         one = _npoints(pylasr.execute(
             pylasr.reader_rectangles([273360.0], [5274360.0], [273490.0], [5274490.0])
