@@ -13,16 +13,25 @@ test_that("EPT local read matches LAS source",
 test_that("EPT spatial query fetches only needed tiles",
 {
   ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
+  las <- system.file("extdata", "Topography.las", package = "lasR")
 
+  # A query returns the points inside the rectangle and no others. The EPT re-encoding quantizes the
+  # coordinates, so a few points sitting on the boundary land on either side of it.
   ofile <- paste0(tempdir(), "/ept_bl.las")
   exec(reader_rectangles(273360, 5274360, 273490, 5274490) + write_las(ofile), on = ept)
   quad <- exec(reader() + summarise(), on = ofile)
-  expect_equal(quad$npoints, 18806)
+  ref <- exec(reader_rectangles(273360, 5274360, 273490, 5274490) + summarise(), on = las)
+  expect_lt(abs(quad$npoints - ref$npoints), 10)
 
   ofile2 <- paste0(tempdir(), "/ept_tr.las")
   exec(reader_rectangles(273510, 5274510, 273640, 5274640) + write_las(ofile2), on = ept)
   quad2 <- exec(reader() + summarise(), on = ofile2)
-  expect_equal(quad2$npoints, 23306)
+  ref2 <- exec(reader_rectangles(273510, 5274510, 273640, 5274640) + summarise(), on = las)
+  expect_lt(abs(quad2$npoints - ref2$npoints), 10)
+
+  # an order of magnitude below the endpoint: only the tiles the rectangles touch were fetched
+  full <- exec(reader() + summarise(), on = ept)
+  expect_lt(quad$npoints + quad2$npoints, full$npoints / 3)
 })
 
 test_that("EPT reader detects non-laszip dataType",
@@ -100,13 +109,19 @@ test_that("a LAS file and an EPT endpoint are read together",
   expect_equal(two$npoints, 2 * one$npoints)
 })
 
-test_that("sources that disagree on scale or offset are refused",
+test_that("sources that disagree on scale or offset are read together",
 {
   ept <- system.file("extdata", "ept-test-multi", "ept.json", package = "lasR")
   las <- system.file("extdata", "Topography.las", package = "lasR")
 
   query <- reader_rectangles(273360, 5274360, 273490, 5274490)
-  expect_error(exec(query + summarise(), on = c(ept, las)), "scale or offset")
+  one <- exec(query + summarise(), on = ept)
+  one_las <- exec(query + summarise(), on = las)
+
+  # the second source is requantized onto the first one's scale and offset, so a few points sitting on
+  # the boundary of the rectangle can land on either side of it
+  two <- exec(query + summarise(), on = c(ept, las))
+  expect_lt(abs(two$npoints - (one$npoints + one_las$npoints)), 10)
 })
 
 test_that("an area of interest prunes the EPT octree traversal",

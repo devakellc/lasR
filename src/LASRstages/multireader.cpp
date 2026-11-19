@@ -131,10 +131,18 @@ bool LASRmultireader::process(Point*& point)
       if (current_source > 0 && !same_quantization(others[current_source-1], header))
         requantize(point, others[current_source-1], header);
 
-      position = aoi_position(point->get_x(), point->get_y());
-      if (position != AOI_INSIDE || point->inside_buffer(xmin, ymin, xmax, ymax, circular))
-        point->set_buffered();
-      if (!in_chunk(point->get_x(), point->get_y())) position = AOI_OUTSIDE;
+      // The chunk is the cheapest test and the one that rejects most of a tile's points: the other
+      // parts of the area of interest are not this chunk's whatever their position in the area
+      if (in_chunk(point->get_x(), point->get_y()))
+      {
+        position = aoi_position(point->get_x(), point->get_y());
+        if (position != AOI_INSIDE || point->inside_buffer(xmin, ymin, xmax, ymax, circular))
+          point->set_buffered();
+      }
+      else
+      {
+        position = AOI_OUTSIDE;
+      }
     }
     else
     {
@@ -172,9 +180,10 @@ bool LASRmultireader::process(PointCloud*& las)
       if (rescale) requantize(&p, others[i-1], header);
       if (pointfilter.filter(&p)) continue;
 
+      if (!in_chunk(p.get_x(), p.get_y())) continue;
+
       AOIposition position = aoi_position(p.get_x(), p.get_y());
       if (position == AOI_OUTSIDE) continue;
-      if (!in_chunk(p.get_x(), p.get_y())) continue;
 
       if (position == AOI_BUFFER || p.inside_buffer(xmin, ymin, xmax, ymax, circular)) p.set_buffered();
       if (!las->add_point(p)) return false;

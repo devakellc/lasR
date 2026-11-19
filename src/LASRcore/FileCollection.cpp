@@ -1181,8 +1181,16 @@ bool FileCollection::get_chunk_with_query(int i, Chunk& chunk) const
   if (chunk.xmax > xmax) chunk.xmax = xmax;
   if (chunk.ymin < ymin) chunk.ymin = ymin;
   if (chunk.ymax > ymax) chunk.ymax = ymax;
+  chunk.is_query = true;
   chunk.buffer = buffer;
   chunk.shape = q->type();
+
+  // The query's own rectangle, taken before the clamp above: a circle or a polygon reaching past the
+  // files would otherwise be read and clipped as a smaller, shifted one
+  chunk.qxmin = minx;
+  chunk.qymin = miny;
+  chunk.qxmax = maxx;
+  chunk.qymax = maxy;
 
   // With an R data.frame there is no file and thus no neighboring files. We can exit.
   if (use_dataframe)

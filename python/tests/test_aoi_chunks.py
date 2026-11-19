@@ -28,9 +28,12 @@ except ImportError as e:
     PYLASR_AVAILABLE = False
     IMPORT_ERROR = str(e)
 
-# Two 20 m clusters 1 km apart, 200 points each
+# Two 20 m clusters 1 km apart, 200 points each, and a few points in the ring a windowed stage reaches
+# into: RING sits outside the cluster and inside the 5 m window the buffer test asks for
 LEFT, RIGHT = 400.0, 1400.0
 Y, HALF, POINTS = 500.0, 10.0, 200
+BOX = 15.0  # half the side of a part of the area of interest
+RING, RING_POINTS = 17.0, 4
 
 
 def cluster(centre_x, z):
@@ -84,13 +87,21 @@ class TestAOIPartsOwnTheirChunks(unittest.TestCase):
         self.las = os.path.join(self.tmp, "two_clusters.las")
 
         left, right = cluster(LEFT, 100.0), cluster(RIGHT, 110.0)
-        self.npoints = len(left[0]) + len(right[0])
-        write_las(self.las, left[0] + right[0], left[1] + right[1], left[2] + right[2])
+        xs, ys, zs = left[0] + right[0], left[1] + right[1], left[2] + right[2]
+
+        for centre in (LEFT, RIGHT):
+            for side in (-1, 1):
+                xs += [centre + side * RING] * RING_POINTS
+                ys += [Y] * RING_POINTS
+                zs += [100.0] * RING_POINTS
+
+        self.npoints = len(xs)
+        write_las(self.las, xs, ys, zs)
 
         self.ept = write_ept(os.path.join(self.tmp, "ept"), self.las, self.npoints)
         self.aoi = multipolygon(
-            (LEFT - 15, Y - 15, LEFT + 15, Y + 15),
-            (RIGHT - 15, Y - 15, RIGHT + 15, Y + 15),
+            (LEFT - BOX, Y - BOX, LEFT + BOX, Y + BOX),
+            (RIGHT - BOX, Y - BOX, RIGHT + BOX, Y + BOX),
         )
 
     def tearDown(self):
@@ -131,11 +142,17 @@ class TestAOIPartsOwnTheirChunks(unittest.TestCase):
 
     def test_a_buffer_ring_is_still_kept(self):
         """A stage with a window keeps the ring around its part that it asks for, and nothing further"""
+        window = 5
         seen = self.chunks(
-            pylasr.reader_polygons(aoi=self.aoi) + pylasr.rasterize(res=1, window=5),
+            pylasr.reader_polygons(aoi=self.aoi) + pylasr.rasterize(res=1, window=window),
             self.ept,
         )
-        self.assert_own_part_only(seen, tolerance=2 * 5 + 2)
+        self.assertEqual(len(seen), 2, "one chunk per part of the area of interest")
+        for xs, _ in seen:
+            centre = LEFT if abs(xs.mean() - LEFT) < abs(xs.mean() - RIGHT) else RIGHT
+            reach = max(abs(xs.min() - centre), abs(xs.max() - centre))
+            self.assertGreater(reach, BOX, "the ring the window asks for is missing")
+            self.assertLessEqual(reach, BOX + window, "the chunk reaches past the ring")
 
 
 if __name__ == "__main__":
