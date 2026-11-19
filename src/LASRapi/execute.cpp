@@ -31,7 +31,7 @@
 
 // The share of the memory the chunks may take. The rest covers what no stage can declare: the
 // allocator, the GDAL caches, the interpreter
-#define AUTO_CHUNK_SHARE 0.9
+#define AUTO_CHUNK_SHARE 0.7
 
 #include "nlohmann/json.hpp"
 
@@ -161,6 +161,10 @@ ReturnType execute(const std::string& config_file)
     // The chunks held at once are the concurrent files. A concurrent-points run holds one
     size_t point_size = lascatalog->get_point_size();
     unsigned long long ram = api::getAvailableRAM()*1000000ull;
+
+    // A container is capped by its cgroup: MemAvailable is the host's free memory and overstates it
+    unsigned long long limit = api::getMemoryLimit()*1000000ull;
+    if (limit > 0 && limit < ram) ram = limit;
     if (point_size > 0 && ram > 0)
     {
       // A streamable pipeline never holds the point cloud

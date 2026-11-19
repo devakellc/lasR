@@ -5,6 +5,7 @@
 - New: `multichm()` accepts `ws` as a function for a variable-size window, like `local_maximum()`
 - New: sources with different scale or offset are merged in one chunk
 - Fix: a chunk reads only the points of the part of the area of interest it was queried for, instead of every point of a shared tile, which made a zone of many scattered plots exhaust memory
+- Fix: the chunks are sized on the memory the process may use, not on the free memory of the host, so a container no longer plans chunks it cannot hold
 - Fix: #338 callback returning R object with multiple files
 
 # lasR 0.21.1

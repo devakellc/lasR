@@ -72,6 +72,31 @@ unsigned long long getTotalRAM()
 
 namespace api
 {
+// The memory this process may use: MemAvailable is the host's, a container is capped by its cgroup
+unsigned long long getMemoryLimit()
+{
+  const char* v2 = "/sys/fs/cgroup/memory.max";
+  const char* v1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
+
+  for (const char* path : {v2, v1})
+  {
+    std::ifstream file(path);
+    std::string value;
+    if (!file || !std::getline(file, value)) continue;
+    if (value.empty() || value == "max") continue;
+
+    try
+    {
+      unsigned long long bytes = std::stoull(value);
+      // cgroup v1 reports a sentinel close to 2^63 when nothing is set
+      if (bytes > 0 && bytes < (1ull << 62)) return bytes/1000000ull;
+    }
+    catch (const std::exception&) {}
+  }
+
+  return 0;
+}
+
 unsigned long long getAvailableRAM()
 {
   std::ifstream meminfo("/proc/meminfo");
