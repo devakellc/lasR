@@ -89,6 +89,7 @@ bool LASRlasreader::process(Point*& point)
       position = aoi_position(point->get_x(), point->get_y());
       if (position != AOI_INSIDE || point->inside_buffer(xmin, ymin, xmax, ymax, circular))
         point->set_buffered();
+      if (!in_chunk(point->get_x(), point->get_y())) position = AOI_OUTSIDE;
     }
     else
     {
@@ -122,6 +123,7 @@ bool LASRlasreader::process(PointCloud*& las)
 
     AOIposition position = aoi_position(p.get_x(), p.get_y());
     if (position == AOI_OUTSIDE) continue;
+    if (!in_chunk(p.get_x(), p.get_y())) continue;
 
     if (position == AOI_BUFFER || p.inside_buffer(xmin, ymin, xmax, ymax, circular)) p.set_buffered();
     if (!las->add_point(p)) return false;

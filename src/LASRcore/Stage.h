@@ -158,6 +158,26 @@ protected:
     return aoi->near_boundary(x, y, buffer) ? AOI_BUFFER : AOI_OUTSIDE;
   };
 
+  // A chunk owns its own rectangle and the buffer ring its stages need around it. A tile or a file
+  // shared by several parts of an area of interest also holds the other parts' points: they belong to
+  // their own chunk, and keeping them here inflates every stage sized on the cloud extent (the CSF
+  // cloth, the rasters) and makes a zone of many scattered plots run out of memory
+  bool in_chunk(double x, double y) const
+  {
+    if (x < xmin - buffer || x > xmax + buffer) return false;
+    if (y < ymin - buffer || y > ymax + buffer) return false;
+
+    if (circular)
+    {
+      double radius = (xmax - xmin) / 2 + buffer;
+      double dx = (xmax + xmin) / 2 - x;
+      double dy = (ymax + ymin) / 2 - y;
+      return dx * dx + dy * dy <= radius * radius;
+    }
+
+    return true;
+  };
+
 protected:
   int ncpu;
   int ncpu_concurrent_files;
