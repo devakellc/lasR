@@ -158,6 +158,34 @@ protected:
     return aoi->near_boundary(x, y, buffer) ? AOI_BUFFER : AOI_OUTSIDE;
   };
 
+  // A chunk owns the region it was asked for, grown by the buffer its stages need and within EPSILON
+  // of that: the readers query the same region grown the same way, so a point the query returns is
+  // never dropped here. A tile or a file shared by several parts of an area of interest also holds
+  // the other parts' points: they belong to their own chunk, and keeping them here inflates every
+  // stage sized on the cloud extent (the CSF cloth, the rasters), which is what made a zone of many
+  // scattered plots run out of memory
+  bool in_chunk(double x, double y) const
+  {
+    // A chunk that is a whole file has nothing to clip: its reader already returns exactly that file
+    if (!clip_to_chunk) return true;
+
+    if (x < qxmin - buffer - EPSILON || x > qxmax + buffer + EPSILON) return false;
+    if (y < qymin - buffer - EPSILON || y > qymax + buffer + EPSILON) return false;
+
+    if (circular)
+    {
+      // The rectangle above is the circle's own box, so the centre and the radius follow from it
+      double cx = (qxmin + qxmax) / 2;
+      double cy = (qymin + qymax) / 2;
+      double radius = (qxmax - qxmin) / 2 + buffer + EPSILON;
+      double dx = cx - x;
+      double dy = cy - y;
+      return dx * dx + dy * dy <= radius * radius;
+    }
+
+    return true;
+  };
+
 protected:
   int ncpu;
   int ncpu_concurrent_files;
@@ -167,6 +195,12 @@ protected:
   double ymax;
   double buffer;
   bool circular;
+  bool clip_to_chunk;
+  // The region the chunk was asked for: xmin..ymax are clamped to the extent of the files
+  double qxmin;
+  double qymin;
+  double qxmax;
+  double qymax;
   std::shared_ptr<const PolygonShape> aoi;
   bool verbose;
   CRS crs;

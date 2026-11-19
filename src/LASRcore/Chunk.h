@@ -30,9 +30,25 @@ struct Chunk
     aoi = nullptr;
     buffer = 0;
     process = true;
+    is_query = false;
+    qxmin = 0;
+    qymin = 0;
+    qxmax = 0;
+    qymax = 0;
     name.clear();
     main_files.clear();
     neighbour_files.clear();
+  };
+
+  // The region this chunk was asked for, as it reached the collection: xmin..ymax above are clamped
+  // to the extent of the files, which would move and shrink a circle reaching past the data. A chunk
+  // that is a whole file was asked for nothing: it reads its own bounds.
+  void query_bounds(double& bxmin, double& bymin, double& bxmax, double& bymax) const
+  {
+    bxmin = is_query ? qxmin : xmin;
+    bymin = is_query ? qymin : ymin;
+    bxmax = is_query ? qxmax : xmax;
+    bymax = is_query ? qymax : ymax;
   };
 
   // # nocov start
@@ -58,6 +74,11 @@ struct Chunk
   ShapeType shape;
   CRS crs;
   std::shared_ptr<const PolygonShape> aoi; // area of interest clipping the chunk, null when there is none
+  bool is_query;      // the chunk comes from a query; the region it was asked for is q* below
+  double qxmin;       // the query's own rectangle, before the clamp to the extent of the files
+  double qymin;
+  double qxmax;
+  double qymax;
   std::string name;
   std::vector<std::string> main_files;
   std::vector<std::string> neighbour_files;

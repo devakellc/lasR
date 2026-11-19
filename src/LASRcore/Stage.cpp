@@ -10,6 +10,12 @@ Stage::Stage()
   ymin = 0;
   xmax = 0;
   ymax = 0;
+  buffer = 0;
+  clip_to_chunk = false;
+  qxmin = 0;
+  qymin = 0;
+  qxmax = 0;
+  qymax = 0;
   verbose = false;
   circular = false;
   progress = nullptr;
@@ -29,7 +35,13 @@ Stage::Stage(const Stage& other)
   ymin = other.ymin;
   xmax = other.xmax;
   ymax = other.ymax;
+  buffer = other.buffer;
   circular = other.circular;
+  clip_to_chunk = other.clip_to_chunk;
+  qxmin = other.qxmin;
+  qymin = other.qymin;
+  qxmax = other.qxmax;
+  qymax = other.qymax;
   aoi = other.aoi;
   verbose = other.verbose;
   ifile = other.ifile;
@@ -57,6 +69,11 @@ bool Stage::set_chunk(Chunk& chunk)
   if (chunk.shape == ShapeType::CIRCLE) circular = true;
   aoi = chunk.aoi;
   buffer = chunk.buffer;
+  clip_to_chunk = chunk.is_query;
+  qxmin = chunk.qxmin;
+  qymin = chunk.qymin;
+  qxmax = chunk.qxmax;
+  qymax = chunk.qymax;
   return true;
 }
 
