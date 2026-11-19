@@ -63,6 +63,12 @@ unsigned long long getTotalRAM()
   GlobalMemoryStatusEx(&memoryStatus);
   return memoryStatus.ullTotalPhys / 1000000;
 }
+
+// No cgroup outside Linux: the host's memory is the only ceiling there is
+unsigned long long getMemoryLimit()
+{
+  return 0;
+}
 }
 
 #elif __linux__
@@ -179,6 +185,12 @@ unsigned long long getAvailableRAM()
   
   // Return in MB
   return available / 1000000;
+}
+
+// No cgroup outside Linux: the host's memory is the only ceiling there is
+unsigned long long getMemoryLimit()
+{
+  return 0;
 }
 }
 
