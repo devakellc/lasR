@@ -48,6 +48,7 @@ bool is_indexed(std::string);
 
 // RAM tools
 unsigned long long getAvailableRAM();
+unsigned long long getMemoryLimit();
 unsigned long long getTotalRAM();
 
 // OpenMP tools
