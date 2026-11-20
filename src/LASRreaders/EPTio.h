@@ -3,18 +3,20 @@
 
 #include "Fileio.h"
 #include "PointSchema.h"
+#include "Shape.h"
 
 #include <nlohmann/json.hpp>
 
-#include <memory>
 #include <string>
 #include <vector>
 #include <deque>
 #include <cstdint>
+#include <future>
+#include <memory>
+#include <array>
 
 class LASio;
 class Header;
-class PolygonShape;
 struct Point;
 
 class EPTio : public Fileio
@@ -33,6 +35,45 @@ public:
     EPTkey(int d, int x, int y, int z) : d(d), x(x), y(y), z(z) {}
   };
 
+  struct TileEntry
+  {
+    EPTkey key;
+    int64_t point_count;
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+  };
+
+  struct HierarchyIndex
+  {
+    nlohmann::json ept_metadata;
+    double cube_bounds[6];
+    double conf_bounds[6];
+    std::string srs_wkt;
+    int srs_epsg = 0;
+    std::string base_path;
+    std::string query_string;
+    bool remote = false;
+    std::string probe_tile_path;
+
+    std::vector<TileEntry> tiles;
+    int64_t total_points = 0;
+    bool tiles_built = false;
+
+    static std::shared_ptr<HierarchyIndex> build_metadata(const std::string& endpoint);
+
+    // Walk the EPT hierarchy from the root, populating `tiles` and
+    // `total_points`. The default (no AOI filter) caches the full walk via
+    // `tiles_built` so subsequent calls are no-ops.
+    //
+    // When `aoi_bboxes` is non-empty, prune the BFS to subtrees whose node
+    // bbox intersects any rect in {xmin,ymin,xmax,ymax}. This is the fast
+    // path for partition_ept on huge EPTs (e.g. continent-scale archives)
+    // where enumerating the full hierarchy would dominate startup. The
+    // result is NOT cached: tiles_built stays false so a later un-filtered
+    // call still walks everything. Callers must reuse only inside the same
+    // logical AOI scope.
+    void ensure_tiles(const std::vector<std::array<double, 4>>& aoi_bboxes = {});
+  };
+
   EPTio();
   ~EPTio();
   void open(const std::string& endpoint) override;
@@ -47,24 +88,59 @@ public:
   int64_t p_count() override;
 
   void set_depth(int depth);
+  void set_index(std::shared_ptr<const HierarchyIndex> idx);
+
+  // Our fork: clip the hierarchy walk to a polygon as well as to the query box
   void set_aoi(const std::shared_ptr<const PolygonShape>& aoi) { this->aoi = aoi; };
 
+  // Our fork: single-endpoint call kept for FileCollection's density estimate
   void query(const std::string& endpoint,
              double xmin, double ymin, double xmax, double ymax,
              double buffer, bool circle,
              std::vector<std::string> filters);
 
-  size_t get_queried_points() const { return total_points; };
+  size_t get_queried_points() const { return (size_t)total_points; };
 
   // Footprint and point count of every node the last query selected
   struct Node { double xmin, ymin, xmax, ymax; size_t npoints; };
   const std::vector<Node>& get_queried_nodes() const { return queried_nodes; };
 
+
 private:
+  std::vector<Node> queried_nodes;
+  std::shared_ptr<const PolygonShape> aoi;
+  double aoi_buffer;
+
+  // TileLoadResult carries any warning text the worker would otherwise
+  // emit directly. R's C API (and lasR's warning() router) is not safe to
+  // call from a non-OpenMP background thread, so the std::async worker
+  // accumulates the message and the consumer thread emits it after
+  // future.get().
+  //
+  // For remote tiles, the worker bulk-downloads the .laz bytes and stashes
+  // them in GDAL's /vsimem/ filesystem so the consumer reads from RAM
+  // (zero network on read_point). vsimem_path is the unique /vsimem/ path
+  // owned by this result — caller must VSIUnlink it after closing `tile`,
+  // because /vsimem/ files are not freed when LASio::close releases the
+  // VSI file handle.
+  struct TileLoadResult
+  {
+    LASio* tile = nullptr;
+    std::string warning_msg;
+    std::string vsimem_path;
+  };
+
   void parse_ept_json();
   void traverse_hierarchy(double qxmin, double qymin, double qxmax, double qymax);
   void load_hierarchy_page(const EPTkey& key, double qxmin, double qymin, double qxmax, double qymax);
   bool open_next_tile();
+  // open_tile_sync constructs a LASio at the given key, opens it, and
+  // populates the header (so the caller does not block on it again).
+  // Safe to call from a background thread: warning text is returned in
+  // TileLoadResult::warning_msg rather than emitted directly.
+  TileLoadResult open_tile_sync(const EPTkey& key);
+  void prefetch_next_tile();
+  void cancel_prefetch();
   std::string read_file_contents(const std::string& path) const;
   std::string tile_path(const EPTkey& key) const;
   std::string hierarchy_path(const EPTkey& key) const;
@@ -76,10 +152,6 @@ private:
   // EPT metadata
   std::string base_path;
   std::string query_string;  // URL query params (e.g. ?token=...) for signed URLs
-
-  // Prunes the traversal, null when there is none, with the buffer the nodes are grown by
-  std::shared_ptr<const PolygonShape> aoi;
-  double aoi_buffer;
   bool remote;
   bool opened;
   nlohmann::json ept_metadata;
@@ -98,12 +170,29 @@ private:
 
   // Hierarchy traversal state
   std::deque<EPTkey> tile_queue;
-  std::vector<Node> queried_nodes;
   int64_t total_points;
 
-  // Current tile reader
+  // Current tile reader. For remote tiles, current_vsimem_path is the
+  // /vsimem/ key holding the buffered tile bytes — it must be VSIUnlink'd
+  // when current_tile is released (otherwise the bytes leak in GDAL's
+  // in-memory FS).
   LASio* current_tile;
+  std::string current_vsimem_path;
+  // Background-prefetched tiles. While read_point drains current_tile,
+  // open_next_tile keeps the queue full at prefetch_depth so multiple
+  // HTTP fetches stay in flight against the EPT endpoint. AWS S3 is
+  // HTTP/1.1-only (no multiplexing), so the only way to overlap is more
+  // concurrent connections; depth=4 matches the saturation point we
+  // measured on usgs-lidar-public from us-east-2. Configurable per-process
+  // via LASR_EPT_PREFETCH env var (default 4, clamped to [1, 32]).
+  std::deque<std::future<TileLoadResult>> prefetch_queue;
+  int prefetch_depth;
   int64_t points_read;
+
+  // Optional shared metadata index (Task 2+). When set via set_index, future
+  // tasks will use this to share metadata across per-chunk readers; currently
+  // unused by the existing read path.
+  std::shared_ptr<const HierarchyIndex> index;
 };
 
 #endif
