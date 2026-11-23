@@ -535,7 +535,9 @@ PYBIND11_MODULE(pylasr, m) {
           py::arg("use_max") = false,
           py::arg("filter") = std::vector<std::string>{""}, py::arg("ofile") = "",
           py::arg("ws_lut") = std::vector<double>{}, py::arg("ws_lut_min") = 0.0,
-          py::arg("ws_lut_step") = 0.5);
+          py::arg("ws_lut_step") = 0.5, py::arg("depth_max") = 0.0, py::arg("near_2d") = 0.0,
+          py::arg("zmin") = 0.0, py::arg("zmin_surface") = 0.0, py::arg("lit_union") = false,
+          py::arg("cover_min") = -1.0, py::arg("report") = "z");
 
     m.def("callback", [](py::object fun, const std::string& expose, py::object args, bool drop_buffer, bool no_las_update) {
         if (!py::hasattr(fun, "__call__"))

@@ -815,6 +815,16 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 #' sorted by decreasing height and retained one by one if no already retained tree lies within
 #' `dist_2d` in 2D and `dist_3d` in 3D.
 #'
+#' A deeper layer also holds peaks that are not trees, local maxima left under the canopy of a
+#' larger crown. `zmin`, `zmin_surface` and, in a closed stand, `depth_max` and `lit_union` discard
+#' them on how far they sit under the local canopy surface; `near_2d` then replaces the distance
+#' filter of a closed stand with a horizontal spacing that binds every accepted top. The candidates
+#' of a deeper layer are judged by their depth, the height of the highest return of a vertical
+#' column around them minus their own height, and `report` selects the height that is recorded. The
+#' defaults keep every candidate and the distance filter above. These are the rules of the depth
+#' gated arm of a multichm benchmark; its infinite bounds are `depth_max = 0` and a negative
+#' `cover_min`.
+#'
 #' @param res numeric. Resolution of the intermediate CHMs.
 #' @param ws numeric or function. Diameter of the circular moving window used to detect the local
 #' maxima on each CHM. A function gives a variable window, as in [local_maximum()]: it receives the
@@ -825,6 +835,20 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 #' @param dist_3d numeric. 3D distance threshold below which a candidate is discarded.
 #' @param use_max logical. Use the max instead of the 95th percentile to build the CHMs. Faster but the
 #' recorded heights are no longer true percentiles.
+#' @param depth_max numeric. Largest depth (m) under the local canopy surface at which a candidate of
+#' a deeper layer is kept in a closed stand. 0 disables the rule.
+#' @param near_2d numeric. Horizontal distance (m) that binds every accepted top of a closed stand.
+#' 0 keeps the distance filter and exempts the surface peaks of a closed stand from it.
+#' @param zmin numeric. Threshold below which a candidate of a deeper layer cannot be a tree.
+#' @param zmin_surface numeric. Threshold below which a candidate of the surface layer cannot be a tree.
+#' @param lit_union logical. Also keep a deeper candidate of a closed stand when it is lit from above
+#' (share of first returns within 1 m of its own top at least 0.75) and no deeper than 5 m.
+#' @param cover_min numeric. Canopy cover (share of first returns above 2 m) at or above which a stand
+#' is closed. 0 closes every stand, a negative value closes none and keeps the distance filter. The
+#' cover and the first return density used by the column are measured on the chunk's own extent, so
+#' the gate needs return numbers and is sensitive to the chunk size.
+#' @param report character. "z" records the height of the candidate, "zrep" the top of the contiguous
+#' column of returns above it.
 #'
 #' @template param-filter
 #' @template param-ofile
@@ -842,14 +866,18 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 #' ans
 #' @export
 #' @md
-multichm = function(res = 1, ws = 3, min_height = 2, layer_thickness = 0.5, dist_2d = 3, dist_3d = 5, use_max = FALSE, filter = "", ofile = tempgpkg())
+multichm = function(res = 1, ws = 3, min_height = 2, layer_thickness = 0.5, dist_2d = 3, dist_3d = 5, use_max = FALSE,
+                    filter = "", ofile = tempgpkg(), depth_max = 0, near_2d = 0, zmin = 0, zmin_surface = 0,
+                    lit_union = FALSE, cover_min = -1, report = "z")
 {
   ofile = normalizePath(ofile, mustWork = FALSE)
   lut = .build_ws_lut(ws)
   if (is.null(lut))
-    return(.APISTAGES$multichm(res, ws, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile, numeric(0), 0, 0.5))
+    return(.APISTAGES$multichm(res, ws, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile, numeric(0), 0, 0.5,
+                               depth_max, near_2d, zmin, zmin_surface, lit_union, cover_min, report))
 
-  .APISTAGES$multichm(res, 0, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile, lut$lut, lut$min, lut$step)
+  .APISTAGES$multichm(res, 0, min_height, layer_thickness, dist_2d, dist_3d, use_max, filter, ofile, lut$lut, lut$min, lut$step,
+                      depth_max, near_2d, zmin, zmin_surface, lit_union, cover_min, report)
 }
 
 # ===== N ====

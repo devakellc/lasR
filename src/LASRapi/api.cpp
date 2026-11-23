@@ -1,3 +1,4 @@
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -276,7 +277,7 @@ Pipeline local_maximum_raster(std::string connect_uid, double ws, double min_hei
   return Pipeline(s);
 }
 
-Pipeline multichm(double res, double ws, double min_height, double layer_thickness, double dist_2d, double dist_3d, bool use_max, std::vector<std::string> filter, std::string ofile, std::vector<double> ws_lut, double ws_lut_min, double ws_lut_step)
+Pipeline multichm(double res, double ws, double min_height, double layer_thickness, double dist_2d, double dist_3d, bool use_max, std::vector<std::string> filter, std::string ofile, std::vector<double> ws_lut, double ws_lut_min, double ws_lut_step, double depth_max, double near_2d, double zmin, double zmin_surface, bool lit_union, double cover_min, std::string report)
 {
   Stage s("multichm");
   s.set("res", res);
@@ -294,6 +295,18 @@ Pipeline multichm(double res, double ws, double min_height, double layer_thickne
     s.set("ws_lut_min", ws_lut_min);
     s.set("ws_lut_step", ws_lut_step);
   }
+
+  // An infinite bound is the study's spelling of "no bound"; the JSON only carries finite numbers
+  if (!std::isfinite(depth_max)) depth_max = 0;
+  if (!std::isfinite(cover_min)) cover_min = -1;
+
+  s.set("depth_max", depth_max);
+  s.set("near_2d", near_2d);
+  s.set("zmin", zmin);
+  s.set("zmin_surface", zmin_surface);
+  s.set("lit_union", lit_union);
+  s.set("cover_min", cover_min);
+  s.set("report", report);
   s.set_vector();
 
   return Pipeline(s);

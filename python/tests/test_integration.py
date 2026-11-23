@@ -771,6 +771,77 @@ class TestMultichm(unittest.TestCase):
         self.assertEqual(run("large", ws=9.0), [100.5])
 
 
+class TestMultichmDepth(unittest.TestCase):
+    """The depth gate of multichm: height floors, depth under the canopy, spacing and zrep.
+
+    The fixture is a surface tree over one cell that holds an understory peak at 4 to 6 m plus
+    ground returns. The peak is a candidate of the second layer, 1 m from the surface tree, so its
+    depth is the height of that tree minus its own: 15.05 m under a 20 m crown, 3.05 m under an 8 m
+    one. The stand is closed when the surface returns are at least 60% of the first returns.
+    """
+
+    def setUp(self):
+        if not PYLASR_AVAILABLE:
+            self.skipTest("pylasr not available")
+
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def tops(self, name, crown=20.0, ground=1, **params):
+        """Tops of one run as (x, z), the understory cell holding 4, 5 and 6 m returns"""
+        las = os.path.join(self.temp_dir, name + ".las")
+        x = [100.5, 101.5, 101.5, 101.5] + [100.5, 101.5] * ground
+        y = [100.5] * 4 + [104.5, 104.5] * ground
+        z = [crown, 4.0, 5.0, 6.0] + [0.0, 0.0] * ground
+        write_las(las, x, y, z)
+
+        ofile = os.path.join(self.temp_dir, name + ".gpkg")
+        pipeline = pylasr.multichm(
+            res=1.0, ws=3.0, dist_2d=0.5, dist_3d=0.5, ofile=ofile, **params
+        )
+        result = pylasr.execute(pipeline, [las])
+        self.assertTrue(result["success"], result.get("message"))
+
+        return sorted((round(px, 1), round(pz, 2)) for px, py, pz in read_points(ofile))
+
+    def test_depth_keeps_only_the_shallow_peaks(self):
+        """A closed stand drops a peak 15 m under its crown, and keeps it when the depth bound allows it"""
+        self.assertEqual(self.tops("stock"), [(100.5, 20.0), (101.5, 4.95)])
+        self.assertEqual(self.tops("d4", cover_min=0.6, depth_max=4.0), [(100.5, 20.0)])
+        self.assertEqual(self.tops("d20", cover_min=0.6, depth_max=20.0),
+                         [(100.5, 20.0), (101.5, 4.95)])
+
+    def test_depth_rule_needs_a_closed_stand(self):
+        """The depth bound reads the cover: an open stand keeps the peak and the distance filter"""
+        self.assertEqual(self.tops("open", ground=5, depth_max=4.0),
+                         [(100.5, 20.0), (101.5, 4.95)])
+
+    def test_deeper_candidates_have_a_height_floor(self):
+        """zmin discards the deeper layers below it, zmin_surface the surface ones"""
+        self.assertEqual(self.tops("zmin", zmin=5.0), [(100.5, 20.0)])
+        self.assertEqual(self.tops("zsurf", zmin_surface=25.0), [(101.5, 4.95)])
+
+    def test_near_2d_binds_every_top_of_a_closed_stand(self):
+        """In a closed stand near_2d replaces the distance filter for every top, surface included"""
+        self.assertEqual(self.tops("n2", cover_min=0.6, near_2d=2.0), [(100.5, 20.0)])
+        self.assertEqual(self.tops("n05", cover_min=0.6, near_2d=0.5),
+                         [(100.5, 20.0), (101.5, 4.95)])
+
+    def test_lit_union_keeps_a_lit_peak_under_the_depth_bound(self):
+        """A peak lit from above and no deeper than 5 m survives a depth bound of 2 m"""
+        self.assertEqual(self.tops("unlit", crown=8.0, cover_min=0.6, depth_max=2.0),
+                         [(100.5, 8.0)])
+        self.assertEqual(self.tops("lit", crown=8.0, cover_min=0.6, depth_max=2.0, lit_union=True),
+                         [(100.5, 8.0), (101.5, 4.95)])
+
+    def test_zrep_reports_the_contiguous_top(self):
+        """zrep climbs the returns above the candidate's own top and stops at the 14 m gap"""
+        self.assertEqual(self.tops("zrep", report="zrep"), [(100.5, 20.0), (101.5, 6.0)])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

@@ -18,21 +18,33 @@ public:
   bool process(PointCloud*& las) override;
   bool write() override;
   void clear(bool last) override;
-  double need_buffer() const override { return MAX3(variable_ws ? max_ws : ws, dist_2d, dist_3d); };
+  double need_buffer() const override;
   bool set_parameters(const nlohmann::json&) override;
   std::string get_name() const override { return "multichm"; };
   std::vector<PointLAS>& get_maxima() override { return lm; };
   bool is_parallelized() const override { return true; };
+  double memory_per_point() const override { return sizeof(double); };
 
   // multi-threading
   LASRmultichm* clone() const override { return new LASRmultichm(*this); };
 
 private:
-  struct Maximum { double x, y, z; };
+  struct Maximum
+  {
+    double x, y, z;
+    int layer;
+    double ztop;
+    double depth;
+    double zrep;
+    double share;
+    bool keep;
+  };
 
   bool build_index(PointCloud* las, const Grid& grid);
-  float update_chm(bool peel, size_t& alive);
-  void find_maxima(const Grid& grid, std::vector<Maximum>& maxima);
+  double update_chm(bool peel, size_t& alive);
+  void find_maxima(const Grid& grid, std::vector<Maximum>& maxima, int layer);
+  void features(PointCloud* las, std::vector<Maximum>& maxima);
+  void gate(std::vector<Maximum>& maxima);
   void select_trees(std::vector<Maximum>& maxima) const;
   void record(const std::vector<Maximum>& trees, const Header* header);
   double window_at(double v) const;
@@ -51,12 +63,30 @@ private:
   double ws_lut_step = 0.5;
   double max_ws = 0;
 
+  // Depth gate of the multichm_depth arm. The defaults leave every candidate in and keep the
+  // package's distance filter: depth_max 0 is an infinite depth, cover_min negative no closed stand
+  double depth_max = 0;
+  double near_2d = 0;
+  double zmin = 0;
+  double zmin_surface = 0;
+  double cover_min = -1;
+  bool lit_union = false;
+  bool report_zrep = false;
+  bool depth_gate = false;
+
+  // Per chunk features the gate reads, measured on the chunk's own extent
+  bool closed = false;
+  bool has_return_number = false;
+  double cover = 0;
+  double frdens = 0;
+  double r_col = 1.0;
+
   // The heights are grouped by cell in 'z' and sorted. The peeling threshold is the same for every
   // point of a cell so the points alive are always a prefix of the run. 'k' is its length.
   std::vector<uint32_t> offset;
-  std::vector<float> z;
+  std::vector<double> z;
   std::vector<uint32_t> k;
-  std::vector<float> chm;
+  std::vector<double> chm;
   std::vector<char> has_lm;
   std::vector<int> active;
   std::vector<std::pair<int,int>> window;
