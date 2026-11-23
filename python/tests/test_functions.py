@@ -220,6 +220,14 @@ class TestGeometricAnalysis(unittest.TestCase):
         pipeline = pylasr.multichm(res=1.0, ws=5.0, min_height=2.0)
         self.assertIsInstance(pipeline, pylasr.Pipeline)
 
+    def test_multichm_depth_gate(self):
+        """Test multichm pipeline creation with the depth gate"""
+        pipeline = pylasr.multichm(
+            res=1.0, ws=5.0, depth_max=4.0, near_2d=3.0, zmin=3.0,
+            zmin_surface=3.0, lit_union=True, cover_min=0.6, report="zrep",
+        )
+        self.assertIsInstance(pipeline, pylasr.Pipeline)
+
     def test_random_walker(self):
         """Test random_walker pipeline creation"""
         chm = pylasr.rasterize(res=1.0, window=1.0, operators=["max"])

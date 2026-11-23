@@ -7,6 +7,17 @@
 #include <cmath>
 #include <unordered_map>
 
+// Constants of the depth gate. They mirror multichm_depth_lib.R of the tree top benchmark
+static const double COLUMN_RADIUS = 1.0;  // smallest horizontal radius of a candidate's column
+static const double COLUMN_FIRST  = 8.0;  // first returns the column holds on average
+static const double ZREP_GAP      = 1.5;  // largest vertical step of the contiguous column
+static const double BAND          = 1.0;  // half height of the band around a candidate's own top
+static const double LIT_SHARE     = 0.75; // first-return share at or above which a top is lit
+static const double LIT_DEPTH     = 5.0;  // largest depth of a lit top
+static const double COVER_HEIGHT  = 2.0;  // first returns above this height are canopy
+static const double MAX_COLUMN    = 3.0;  // column radius at the lowest density the gate is used on
+static const double PI            = 3.14159265358979323846;
+
 // 95th percentile of the n first values of a sorted run. Same convention as MetricManager::percentile
 static float percentile95(const float* x, uint32_t n)
 {
@@ -42,6 +53,14 @@ static std::vector<std::pair<int,int>> build_window(double ws, double res)
   return window;
 }
 
+// Key of the bucket a coordinate falls in, for a grid of cell size 'cell'
+static uint64_t bucket_key(double x, double y, double cell)
+{
+  int32_t bx = (int32_t)std::floor(x/cell);
+  int32_t by = (int32_t)std::floor(y/cell);
+  return (((uint64_t)(uint32_t)bx) << 32) | (uint32_t)by;
+}
+
 LASRmultichm::LASRmultichm()
 {
   res = 1.0;
@@ -54,6 +73,16 @@ LASRmultichm::LASRmultichm()
 
   counter = std::make_shared<unsigned int>(0);
   unicity_table = std::make_shared<std::unordered_map<uint64_t, unsigned int>>();
+}
+
+double LASRmultichm::need_buffer() const
+{
+  double b = MAX3(variable_ws ? max_ws : ws, dist_2d, dist_3d);
+
+  // The column of a candidate reaches MAX_COLUMN further than its own top
+  if (depth_gate) b = std::max(b, std::max(near_2d, MAX_COLUMN));
+
+  return b;
 }
 
 double LASRmultichm::window_at(double v) const
@@ -109,6 +138,30 @@ bool LASRmultichm::set_parameters(const nlohmann::json& stage)
     return false;
   }
 
+  depth_max = stage.value("depth_max", 0.0);
+  near_2d = stage.value("near_2d", 0.0);
+  zmin = stage.value("zmin", 0.0);
+  zmin_surface = stage.value("zmin_surface", 0.0);
+  lit_union = stage.value("lit_union", false);
+  cover_min = stage.value("cover_min", -1.0);
+  std::string report = stage.value("report", std::string("z"));
+
+  if (depth_max < 0 || near_2d < 0 || zmin < 0 || zmin_surface < 0 || cover_min < -1)
+  {
+    last_error = "depth_max, near_2d, zmin, zmin_surface and cover_min must be positive";
+    return false;
+  }
+
+  if (report != "z" && report != "zrep")
+  {
+    last_error = "report must be 'z' or 'zrep'";
+    return false;
+  }
+
+  report_zrep = report == "zrep";
+  depth_gate = depth_max > 0 || near_2d > 0 || zmin > 0 || zmin_surface > 0 || lit_union
+            || cover_min >= 0 || report_zrep;
+
   vector = Vector(xmin, ymin, xmax, ymax);
   vector.set_geometry_type(wkbPoint25D);
 
@@ -145,16 +198,24 @@ bool LASRmultichm::process(PointCloud*& las)
   std::vector<Maximum> maxima;
   size_t alive = 0;
   float zmax = update_chm(false, alive);
+  int layer = 1;
 
   while (!active.empty() && zmax > min_height)
   {
     if (progress->interrupted()) break;
 
-    find_maxima(grid, maxima);
+    find_maxima(grid, maxima, layer);
     zmax = update_chm(true, alive);
+    layer++;
 
     progress->update(las->npoints - alive);
     progress->show();
+  }
+
+  if (depth_gate)
+  {
+    features(las, maxima);
+    gate(maxima);
   }
 
   select_trees(maxima);
@@ -174,7 +235,9 @@ bool LASRmultichm::process(PointCloud*& las)
   return true;
 }
 
-// Group the heights by cell and sort each group. This is the only pass over the points
+// Group the heights by cell and sort each group. This is the only pass over the points with the
+// one that reads the columns of the candidates. It also measures the canopy cover and the first
+// return density the depth gate reads, on the chunk's own extent
 bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
 {
   int ncells = grid.get_ncells();
@@ -195,10 +258,18 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
   std::vector<int32_t> cell_of(las->npoints, -1);
   std::vector<float> zval(las->npoints);
 
+  has_return_number = las->header->schema.find_attribute("ReturnNumber") != nullptr;
+
+  size_t nfirst = 0;
+  size_t ncanopy = 0;
+
   #pragma omp parallel num_threads(ncpu)
   {
     Point p;
     p.set_schema(&las->header->schema);
+    AttributeAccessor return_number("ReturnNumber");
+    size_t first = 0;
+    size_t canopy = 0;
 
     #pragma omp for
     for (size_t i = 0 ; i < las->npoints ; i++)
@@ -210,6 +281,36 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
       zval[i] = (float)p.get_z();
       #pragma omp atomic
       offset[cell+1]++;
+
+      if (!depth_gate || !has_return_number) continue;
+      if (return_number(&p) != 1.0) continue;
+
+      double x = p.get_x();
+      double y = p.get_y();
+      if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
+
+      first++;
+      if (zval[i] > COVER_HEIGHT) canopy++;
+    }
+
+    #pragma omp atomic
+    nfirst += first;
+    #pragma omp atomic
+    ncanopy += canopy;
+  }
+
+  if (depth_gate)
+  {
+    double area = std::max(0.0, xmax - xmin) * std::max(0.0, ymax - ymin);
+    frdens = (area > 0) ? (double)nfirst/area : 0.0;
+    cover = (nfirst > 0) ? (double)ncanopy/(double)nfirst : NAN;
+    r_col = (frdens > 0) ? std::max(COLUMN_RADIUS, std::sqrt(COLUMN_FIRST/(PI*frdens))) : MAX_COLUMN;
+
+    // A closed stand is decided on the cover: without return numbers there is none
+    if (cover_min > 0 && cover_min <= 1 && !std::isfinite(cover))
+    {
+      last_error = "the depth gate needs the canopy cover, which requires first returns";
+      return false;
     }
   }
 
@@ -287,7 +388,8 @@ float LASRmultichm::update_chm(bool peel, size_t& alive)
 // Sequential on purpose: a same-height neighbour only suppresses once it is itself confirmed
 // (has_lm), matching lidRplugins::multichm(); a naive parallel pass lets a rejected neighbour
 // suppress too and collapses a whole flat plateau to one point.
-void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
+// 'top' is the highest point still alive in the cell: the height of the candidate's own top
+void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima, int layer)
 {
   int ncols = grid.get_ncols();
   int nrows = grid.get_nrows();
@@ -326,8 +428,115 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
     if (is_max)
     {
       has_lm[c] = 1;
-      maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v});
+      maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v, layer,
+                        z[offset[c] + k[c] - 1], 0.0, (double)v, NAN, true});
     }
+  }
+}
+
+// Depth, contiguous top and first return share of every candidate. A candidate's column is every
+// return within r_col horizontally; its depth is the highest of them minus its own height, its
+// zrep the top of the run that climbs from the candidate's own top with steps of at most ZREP_GAP,
+// and its share the fraction of first returns within BAND of that top.
+// Sequential: the candidates of a bucket are shared by the points around them
+void LASRmultichm::features(PointCloud* las, std::vector<Maximum>& maxima)
+{
+  size_t n = maxima.size();
+  if (n == 0) return;
+
+  std::unordered_map<uint64_t, std::vector<uint32_t>> buckets;
+  for (uint32_t i = 0 ; i < n ; i++)
+    buckets[bucket_key(maxima[i].x, maxima[i].y, r_col)].push_back(i);
+
+  std::vector<std::vector<float>> above(n);
+  std::vector<uint32_t> nband(n, 0);
+  std::vector<uint32_t> nfirst(n, 0);
+  std::vector<float> top(n);
+  for (size_t i = 0 ; i < n ; i++) top[i] = maxima[i].ztop;
+
+  double r2 = r_col*r_col;
+
+  Point p;
+  p.set_schema(&las->header->schema);
+  AttributeAccessor return_number("ReturnNumber");
+
+  for (size_t i = 0 ; i < las->npoints ; i++)
+  {
+    if (!las->get_point(i, &p, &pointfilter)) continue;
+
+    double x = p.get_x();
+    double y = p.get_y();
+    float zz = (float)p.get_z();
+    bool first = has_return_number && return_number(&p) == 1.0;
+
+    int32_t bx = (int32_t)std::floor(x/r_col);
+    int32_t by = (int32_t)std::floor(y/r_col);
+
+    for (int32_t dbx = -1 ; dbx <= 1 ; dbx++)
+    {
+      for (int32_t dby = -1 ; dby <= 1 ; dby++)
+      {
+        auto it = buckets.find((((uint64_t)(uint32_t)(bx+dbx)) << 32) | (uint32_t)(by+dby));
+        if (it == buckets.end()) continue;
+
+        for (uint32_t ci : it->second)
+        {
+          const Maximum& m = maxima[ci];
+          double dx = x - m.x;
+          double dy = y - m.y;
+          if (dx*dx + dy*dy > r2) continue;
+
+          if (zz > top[ci]) top[ci] = zz;
+          if (zz > m.ztop) above[ci].push_back(zz);
+          if (std::fabs(zz - m.ztop) <= BAND)
+          {
+            nband[ci]++;
+            if (first) nfirst[ci]++;
+          }
+        }
+      }
+    }
+  }
+
+  for (size_t i = 0 ; i < n ; i++)
+  {
+    Maximum& m = maxima[i];
+
+    m.depth = (double)top[i] - m.z;
+
+    std::sort(above[i].begin(), above[i].end());
+    double zrep = m.ztop;
+    for (float v : above[i])
+    {
+      if ((double)v - zrep > ZREP_GAP) break;
+      zrep = v;
+    }
+    m.zrep = zrep;
+
+    m.share = (nband[i] > 0) ? (double)nfirst[i]/(double)nband[i] : NAN;
+  }
+}
+
+// Keep rules: height floors of the surface and of the deeper layers in every stand, and in a
+// closed stand a deepest position under the canopy surface for the deeper layers, or a lit one.
+// A closed stand is cover >= cover_min; a negative cover_min means no stand is closed
+void LASRmultichm::gate(std::vector<Maximum>& maxima)
+{
+  closed = cover_min >= 0 && (cover_min == 0 || cover >= cover_min);
+
+  for (auto& m : maxima)
+  {
+    bool surface = m.layer == 1;
+    bool keep = surface ? (m.z >= zmin_surface) : (m.z >= zmin);
+
+    if (!surface && closed)
+    {
+      bool enough = depth_max <= 0 || m.depth <= depth_max;
+      if (!enough && lit_union) enough = m.share >= LIT_SHARE && m.depth <= LIT_DEPTH;
+      keep = keep && enough;
+    }
+
+    m.keep = keep;
   }
 }
 
@@ -335,11 +544,16 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima)
 // retained. Ties are broken on the coordinates to get a reproducible order.
 // Retained trees are bucketed on a MAX(dist_2d, dist_3d) grid so a candidate only scans its
 // 3x3 neighbourhood instead of every tree kept so far.
+// In a closed stand with near_2d, one horizontal spacing applies to every kept top and the
+// surface peaks are no longer exempt; without it the surface peaks of a closed stand are kept
+// unconditionally. An open stand keeps the package's filter.
 void LASRmultichm::select_trees(std::vector<Maximum>& maxima) const
 {
   double d2d = dist_2d*dist_2d;
   double d3d = dist_3d*dist_3d;
-  double cell = MAX(dist_2d, dist_3d);
+  double spacing = near_2d*near_2d;
+  bool uniform = closed && near_2d > 0;
+  double cell = MAX(MAX(dist_2d, dist_3d), near_2d);
 
   std::sort(maxima.begin(), maxima.end(), [](const Maximum& a, const Maximum& b)
   {
@@ -351,42 +565,44 @@ void LASRmultichm::select_trees(std::vector<Maximum>& maxima) const
   std::vector<Maximum> trees;
   std::unordered_map<uint64_t, std::vector<uint32_t>> buckets;
 
-  auto bucket_key = [cell](double x, double y) -> uint64_t
-  {
-    int32_t bx = (int32_t)std::floor(x/cell);
-    int32_t by = (int32_t)std::floor(y/cell);
-    return (((uint64_t)(uint32_t)bx) << 32) | (uint32_t)by;
-  };
-
   for (const auto& m : maxima)
   {
+    if (!m.keep) continue;
+
+    bool exempt = closed && !uniform && m.layer == 1;
+    bool detected = exempt;
     int32_t bx = (int32_t)std::floor(m.x/cell);
     int32_t by = (int32_t)std::floor(m.y/cell);
-    bool detected = true;
 
-    for (int dbx = -1 ; dbx <= 1 && detected ; dbx++)
+    if (!exempt)
     {
-      for (int dby = -1 ; dby <= 1 && detected ; dby++)
+      detected = true;
+
+      for (int dbx = -1 ; dbx <= 1 && detected ; dbx++)
       {
-        auto it = buckets.find((((uint64_t)(uint32_t)(bx+dbx)) << 32) | (uint32_t)(by+dby));
-        if (it == buckets.end()) continue;
-
-        for (uint32_t idx : it->second)
+        for (int dby = -1 ; dby <= 1 && detected ; dby++)
         {
-          const Maximum& t = trees[idx];
-          double dx = m.x - t.x;
-          double dy = m.y - t.y;
-          double dz = m.z - t.z;
-          double dd = dx*dx + dy*dy;
+          auto it = buckets.find((((uint64_t)(uint32_t)(bx+dbx)) << 32) | (uint32_t)(by+dby));
+          if (it == buckets.end()) continue;
 
-          if (dd < d2d || dd + dz*dz < d3d) { detected = false; break; }
+          for (uint32_t idx : it->second)
+          {
+            const Maximum& t = trees[idx];
+            double dx = m.x - t.x;
+            double dy = m.y - t.y;
+            double dz = m.z - t.z;
+            double dd = dx*dx + dy*dy;
+
+            if (uniform) { if (dd < spacing) { detected = false; break; } }
+            else if (dd < d2d || dd + dz*dz < d3d) { detected = false; break; }
+          }
         }
       }
     }
 
     if (detected)
     {
-      buckets[bucket_key(m.x, m.y)].push_back((uint32_t)trees.size());
+      buckets[bucket_key(m.x, m.y, cell)].push_back((uint32_t)trees.size());
       trees.push_back(m);
     }
   }
@@ -405,7 +621,7 @@ void LASRmultichm::record(const std::vector<Maximum>& trees, const Header* heade
       PointLAS p;
       p.x = t.x;
       p.y = t.y;
-      p.z = t.z;
+      p.z = report_zrep ? t.zrep : t.z;
 
       // A tree found twice in two overlapping chunks must get the same ID. The quantized
       // coordinates are a unique geographic key mapped to a 32 bit counter
