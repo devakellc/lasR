@@ -23,6 +23,7 @@ public:
   std::string get_name() const override { return "multichm"; };
   std::vector<PointLAS>& get_maxima() override { return lm; };
   bool is_parallelized() const override { return true; };
+  double memory_per_point() const override { return sizeof(double); };
 
   // multi-threading
   LASRmultichm* clone() const override { return new LASRmultichm(*this); };
@@ -32,7 +33,7 @@ private:
   {
     double x, y, z;
     int layer;
-    float ztop;
+    double ztop;
     double depth;
     double zrep;
     double share;
@@ -40,7 +41,7 @@ private:
   };
 
   bool build_index(PointCloud* las, const Grid& grid);
-  float update_chm(bool peel, size_t& alive);
+  double update_chm(bool peel, size_t& alive);
   void find_maxima(const Grid& grid, std::vector<Maximum>& maxima, int layer);
   void features(PointCloud* las, std::vector<Maximum>& maxima);
   void gate(std::vector<Maximum>& maxima);
@@ -83,9 +84,9 @@ private:
   // The heights are grouped by cell in 'z' and sorted. The peeling threshold is the same for every
   // point of a cell so the points alive are always a prefix of the run. 'k' is its length.
   std::vector<uint32_t> offset;
-  std::vector<float> z;
+  std::vector<double> z;
   std::vector<uint32_t> k;
-  std::vector<float> chm;
+  std::vector<double> chm;
   std::vector<char> has_lm;
   std::vector<int> active;
   std::vector<std::pair<int,int>> window;

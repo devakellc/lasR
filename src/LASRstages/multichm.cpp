@@ -11,6 +11,7 @@
 static const double COLUMN_RADIUS = 1.0;  // smallest horizontal radius of a candidate's column
 static const double COLUMN_FIRST  = 8.0;  // first returns the column holds on average
 static const double ZREP_GAP      = 1.5;  // largest vertical step of the contiguous column
+static const double SHARE_RADIUS  = 1.0;  // horizontal radius of a candidate's first-return share
 static const double BAND          = 1.0;  // half height of the band around a candidate's own top
 static const double LIT_SHARE     = 0.75; // first-return share at or above which a top is lit
 static const double LIT_DEPTH     = 5.0;  // largest depth of a lit top
@@ -19,13 +20,13 @@ static const double MAX_COLUMN    = 3.0;  // column radius at the lowest density
 static const double PI            = 3.14159265358979323846;
 
 // 95th percentile of the n first values of a sorted run. Same convention as MetricManager::percentile
-static float percentile95(const float* x, uint32_t n)
+static double percentile95(const double* x, uint32_t n)
 {
-  float rank = 0.95f * (float)(n - 1) + 1.0f;
+  double rank = 0.95 * (double)(n - 1) + 1.0;
   uint32_t i = (uint32_t)rank;
-  float frac = rank - (float)i;
-  float lo = x[i - 1];
-  float hi = (frac > 0.0f) ? x[i] : lo;
+  double frac = rank - (double)i;
+  double lo = x[i - 1];
+  double hi = (frac > 0.0) ? x[i] : lo;
   return lo + (hi - lo) * frac;
 }
 
@@ -197,7 +198,7 @@ bool LASRmultichm::process(PointCloud*& las)
 
   std::vector<Maximum> maxima;
   size_t alive = 0;
-  float zmax = update_chm(false, alive);
+  double zmax = update_chm(false, alive);
   int layer = 1;
 
   while (!active.empty() && zmax > min_height)
@@ -256,7 +257,7 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
   // Decode and filter each point once; the scatter below reuses (cell, z) instead of
   // calling get_point() and cell_from_xy() again
   std::vector<int32_t> cell_of(las->npoints, -1);
-  std::vector<float> zval(las->npoints);
+  std::vector<double> zval(las->npoints);
 
   has_return_number = las->header->schema.find_attribute("ReturnNumber") != nullptr;
 
@@ -278,7 +279,7 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
       int cell = grid.cell_from_xy(p.get_x(), p.get_y());
       if (cell < 0) continue;
       cell_of[i] = cell;
-      zval[i] = (float)p.get_z();
+      zval[i] = p.get_z();
       #pragma omp atomic
       offset[cell+1]++;
 
@@ -340,9 +341,9 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
 
 // Peel the band below the current CHM and rebuild the CHM of the cells that remain. A cell with
 // nothing left above min_height cannot be a maximum nor suppress a neighbour. It is removed
-float LASRmultichm::update_chm(bool peel, size_t& alive)
+double LASRmultichm::update_chm(bool peel, size_t& alive)
 {
-  float zmax = NA_F32_RASTER;
+  double zmax = NA_F32_RASTER;
   size_t nalive = 0;
   size_t n = active.size();
 
@@ -350,11 +351,11 @@ float LASRmultichm::update_chm(bool peel, size_t& alive)
   for (size_t a = 0 ; a < n ; a++)
   {
     int c = active[a];
-    const float* run = z.data() + offset[c];
+    const double* run = z.data() + offset[c];
 
     if (peel)
     {
-      float threshold = (float)(chm[c] - layer_thickness);
+      double threshold = chm[c] - layer_thickness;
       k[c] = (uint32_t)(std::lower_bound(run, run + k[c], threshold) - run);
     }
 
@@ -400,7 +401,7 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima, i
     int c = active[a];
     if (has_lm[c]) continue;
 
-    float v = chm[c];
+    double v = chm[c];
     if (v < min_height) continue;
 
     int row = c/ncols;
@@ -419,7 +420,7 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima, i
       if (rr < 0 || rr >= nrows || cc < 0 || cc >= ncols) continue;
 
       int j = rr*ncols + cc;
-      float u = chm[j];
+      double u = chm[j];
 
       if (u == NA_F32_RASTER) continue;
       if (u > v || (u == v && has_lm[j])) is_max = false;
@@ -428,8 +429,8 @@ void LASRmultichm::find_maxima(const Grid& grid, std::vector<Maximum>& maxima, i
     if (is_max)
     {
       has_lm[c] = 1;
-      maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), (double)v, layer,
-                        z[offset[c] + k[c] - 1], 0.0, (double)v, NAN, true});
+      maxima.push_back({grid.x_from_cell(c), grid.y_from_cell(c), v, layer,
+                        z[offset[c] + k[c] - 1], 0.0, v, NAN, true});
     }
   }
 }
@@ -448,13 +449,14 @@ void LASRmultichm::features(PointCloud* las, std::vector<Maximum>& maxima)
   for (uint32_t i = 0 ; i < n ; i++)
     buckets[bucket_key(maxima[i].x, maxima[i].y, r_col)].push_back(i);
 
-  std::vector<std::vector<float>> above(n);
+  std::vector<std::vector<double>> above(n);
   std::vector<uint32_t> nband(n, 0);
   std::vector<uint32_t> nfirst(n, 0);
-  std::vector<float> top(n);
+  std::vector<double> top(n);
   for (size_t i = 0 ; i < n ; i++) top[i] = maxima[i].ztop;
 
   double r2 = r_col*r_col;
+  double share2 = SHARE_RADIUS*SHARE_RADIUS;
 
   Point p;
   p.set_schema(&las->header->schema);
@@ -466,7 +468,7 @@ void LASRmultichm::features(PointCloud* las, std::vector<Maximum>& maxima)
 
     double x = p.get_x();
     double y = p.get_y();
-    float zz = (float)p.get_z();
+    double zz = p.get_z();
     bool first = has_return_number && return_number(&p) == 1.0;
 
     int32_t bx = (int32_t)std::floor(x/r_col);
@@ -484,11 +486,12 @@ void LASRmultichm::features(PointCloud* las, std::vector<Maximum>& maxima)
           const Maximum& m = maxima[ci];
           double dx = x - m.x;
           double dy = y - m.y;
-          if (dx*dx + dy*dy > r2) continue;
+          double d2 = dx*dx + dy*dy;
+          if (d2 > r2) continue;
 
           if (zz > top[ci]) top[ci] = zz;
           if (zz > m.ztop) above[ci].push_back(zz);
-          if (std::fabs(zz - m.ztop) <= BAND)
+          if (d2 <= share2 && std::fabs(zz - m.ztop) <= BAND)
           {
             nband[ci]++;
             if (first) nfirst[ci]++;
@@ -502,11 +505,11 @@ void LASRmultichm::features(PointCloud* las, std::vector<Maximum>& maxima)
   {
     Maximum& m = maxima[i];
 
-    m.depth = (double)top[i] - m.z;
+    m.depth = top[i] - m.z;
 
     std::sort(above[i].begin(), above[i].end());
     double zrep = m.ztop;
-    for (float v : above[i])
+    for (double v : above[i])
     {
       if ((double)v - zrep > ZREP_GAP) break;
       zrep = v;
@@ -663,10 +666,10 @@ bool LASRmultichm::write()
 void LASRmultichm::clear(bool last)
 {
   lm.clear();
-  std::vector<float>().swap(z);
+  std::vector<double>().swap(z);
   std::vector<uint32_t>().swap(offset);
   std::vector<uint32_t>().swap(k);
-  std::vector<float>().swap(chm);
+  std::vector<double>().swap(chm);
   std::vector<char>().swap(has_lm);
   std::vector<int>().swap(active);
 }
