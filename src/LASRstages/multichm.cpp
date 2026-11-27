@@ -307,12 +307,9 @@ bool LASRmultichm::build_index(PointCloud* las, const Grid& grid)
     cover = (nfirst > 0) ? (double)ncanopy/(double)nfirst : NAN;
     r_col = (frdens > 0) ? std::max(COLUMN_RADIUS, std::sqrt(COLUMN_FIRST/(PI*frdens))) : MAX_COLUMN;
 
-    // A closed stand is decided on the cover: without return numbers there is none
-    if (cover_min > 0 && cover_min <= 1 && !std::isfinite(cover))
-    {
-      last_error = "the depth gate needs the canopy cover, which requires first returns";
-      return false;
-    }
+    // A closed stand is decided on the cover. A chunk cut by the chunker can hold ground and
+    // later returns only, and then there is no cover: the NaN comparison in gate() leaves that
+    // chunk open instead of failing the run
   }
 
   for (int c = 0 ; c < ncells ; c++) offset[c+1] += offset[c];
