@@ -735,6 +735,29 @@ class TestMultichm(unittest.TestCase):
         self.assertEqual(len(run()), 1)
         self.assertEqual(len(run(chunk=10.0)), 1)
 
+    def test_a_chunk_without_first_returns_is_not_closed(self):
+        """A chunk holding no first return has no cover: the stand is open, not an error"""
+        las = os.path.join(self.temp_dir, "nofirst.las")
+        write_las(
+            las,
+            [100.5, 101.5, 101.5, 101.5, 100.5, 101.5],
+            [100.5, 100.5, 100.5, 100.5, 104.5, 104.5],
+            [20.0, 4.0, 5.0, 6.0, 0.0, 0.0],
+            return_number=2,
+            number_of_returns=2,
+        )
+
+        ofile = os.path.join(self.temp_dir, "out_nofirst.gpkg")
+        pipeline = pylasr.multichm(
+            res=1.0, ws=3.0, dist_2d=0.5, dist_3d=0.5, ofile=ofile,
+            cover_min=0.6, depth_max=4.0,
+        )
+        result = pylasr.execute(pipeline, [las])
+        self.assertTrue(result["success"], result.get("message"))
+
+        # with no cover to test the depth rule stays out of the way, as in a stand that is open
+        self.assertEqual(sorted(round(p[2], 2) for p in read_points(ofile)), [4.95, 20.0])
+
     def test_tie_handling_matches_reference(self):
         """On a flat run of equal-height cells, ties must resolve the way
         lidRplugins::multichm() does and not collapse to a single survivor"""

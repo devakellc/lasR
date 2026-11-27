@@ -47,13 +47,15 @@ def safe_unlink(filepath, warn=False):
             # Otherwise, continue silently
 
 
-def write_las(path, x, y, z, scale=0.001):
+def write_las(path, x, y, z, scale=0.001, return_number=1, number_of_returns=1):
     """Write a minimal uncompressed LAS 1.2 (point format 0) file from raw coordinates.
 
     There is no laspy here, so this hand-rolls the public header and point records to
     give tests full control over point placement without depending on a fixture file.
     """
     n = len(x)
+    # point format 0 packs the return number and the number of returns into one byte
+    return_bits = (return_number & 0x07) | ((number_of_returns & 0x07) << 3)
     header = struct.pack(
         "<4sHHIHH8sBB32s32sHHHIIBHI5I12d",
         b"LASF", 0, 0, 0, 0, 0, b"\x00" * 8, 1, 2,
@@ -70,7 +72,7 @@ def write_las(path, x, y, z, scale=0.001):
             f.write(struct.pack(
                 "<iiiHBBbBH",
                 round(xi / scale), round(yi / scale), round(zi / scale),
-                0, 0x09, 0, 0, 0, 0,
+                0, return_bits, 0, 0, 0, 0,
             ))
 
 

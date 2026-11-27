@@ -846,7 +846,8 @@ local_maximum_raster = function(raster, ws, min_height = 2, filter = "", ofile =
 #' @param cover_min numeric. Canopy cover (share of first returns above 2 m) at or above which a stand
 #' is closed. 0 closes every stand, a negative value closes none and keeps the distance filter. The
 #' cover and the first return density used by the column are measured on the chunk's own extent, so
-#' the gate needs return numbers and is sensitive to the chunk size.
+#' the gate needs return numbers and is sensitive to the chunk size. A chunk that holds no first
+#' return has no cover to test and is treated as an open stand rather than as an error.
 #' @param report character. "z" records the height of the candidate, "zrep" the top of the contiguous
 #' column of returns above it.
 #'
